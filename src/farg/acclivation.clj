@@ -11,7 +11,8 @@
                                defopts with-*out*]
              :as util]
             [farg.with-state :refer [with-state]]
-            [farg.acclivation.sa :as sa]))
+            [farg.acclivation.sa :as sa])
+  (:gen-class))
 
 ;;;; Naming conventions:
 ;;;;
