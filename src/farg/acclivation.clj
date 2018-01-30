@@ -502,5 +502,11 @@
 ;               (fitness-as-seen-by best :radius radius :step step))
           (return best))))))
 
+(defn make-article-data
+  "Makes all the fitness-func and population data files for the article."
+  []
+  (doseq [seed (range 1 41)]
+    (run :seed seed)))
+
 (defn -main [& args]
   (println "For now, run in the REPL."))
