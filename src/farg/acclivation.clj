@@ -1,17 +1,18 @@
 (ns farg.acclivation
-  (:refer-clojure :exclude [rand rand-int cond])
+  (:refer-clojure :exclude [rand rand-int cond memoize])
   (:require [clojure.tools.trace :refer [deftrace] :as trace]
             [clojure.pprint :refer [pprint]]
             [clojure.math.combinatorics :as combo]
             [clojure.math.numeric-tower :as math]
             [clojure.java.io :refer [file writer]]
             [clj-time.local :as ltime]
-            [ubergraph.core :as uber]
             [farg.util :refer [dd dde choose choose-one with-rng-seed mround
                                defopts with-*out*]
              :as util]
             [farg.with-state :refer [with-state]]
-            [farg.acclivation.sa :as sa])
+            [farg.acclivation.sa :as sa]
+            [potemkin :refer [fast-memoize] :rename {fast-memoize memoize}]
+            [ubergraph.core :as uber])
   (:gen-class))
 
 ;;;; Naming conventions:
@@ -124,6 +125,8 @@
 
 (defn w [ph]
   (+ (w12 ph) (w-many-small-hills ph) (w-distance ph)))
+
+(def w (memoize w))
 
 #_(defn w [ph]
   (* #_(w-equal ph) (Math/pow (w-distance ph) 2.0)))
@@ -402,6 +405,16 @@
             [endcoord fitness] (f [startx starty])]
         (apply println (concat startcoord [fitness] endcoord))))))
 
+(defn virtual-fitness-fn
+  "Returns the fitness function f seen by the \"numbers\" part of genotype g.
+  (f [startcoord]) returns [endcoord fitness], where endcoord is the phenotype
+  resulting from startcoord."
+  [g]
+  (fn [startcoord]
+    (let [g' (assoc g :numbers startcoord)
+          ph (genotype->phenotype g')]
+      [ph (w ph)])))
+
 ;IDEA What's the average fitness?
 ;IDEA Look at where the fitness goes varying only one axis at a time.
 ;See the fitness function of x, holding y constant.
@@ -439,7 +452,7 @@
    :or {generations 20, population-size 20, tourney-size 5,
         f-mutate (partial mutate-n 2), f-cross crossover,
         fitness genotype-fitness, seed 1,
-        radius nil, step 0.05}} ;arguments for fitness-as-seen-by
+        radius nil, step 0.005}} ;arguments for fitness-as-seen-by
           ;make step 0.005 for precise fitness func (it just takes a long time)
   n-mutants (default-to n-mutants (int (* population-size 1.5)))
   n-crosses (default-to n-crosses (int (* population-size 0.5)))
@@ -484,7 +497,9 @@
             -- (print-population p))
           (bind best (best-of p))
           -- (with-*out* (writer vfit-file)
-               (fitness-as-seen-by best :radius radius :step step))
+               (print-fitness-fn (virtual-fitness-fn best) :step step))
+;          -- (with-*out* (writer vfit-file)
+;               (fitness-as-seen-by best :radius radius :step step))
           (return best))))))
 
 (defn -main [& args]

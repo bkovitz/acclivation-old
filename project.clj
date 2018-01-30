@@ -19,9 +19,9 @@
                  [org.clojure/core.async "0.3.443"]
                  [net.mikera/core.matrix "0.61.0"]
                  [popen "0.3.1"]
+                 [potemkin "0.4.4"]
                  [seesaw "1.4.5"]
-                 [ubergraph "0.2.1"]]
-  ;:main ^:skip-aot acclivation.core
+                 [ubergraph "0.4.0"]]
   :main ^:skip-aot farg.acclivation
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all}})
