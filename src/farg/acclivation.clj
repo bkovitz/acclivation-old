@@ -151,10 +151,10 @@
         (bind [from to] (util/choose-with-replacement 2 nodes))
         (bind weight (random-weight))
         (uber/add-edges [from to weight]))
-      (uber/add-edges [:g1 (choose extra-nodes) (random-weight)])
-      (uber/add-edges [:g2 (choose extra-nodes) (random-weight)])
-      (uber/add-edges [(choose extra-nodes) :p1 (random-weight)])
-      (uber/add-edges [(choose extra-nodes) :p2 (random-weight)])
+      ;(uber/add-edges [:g1 (choose extra-nodes) (random-weight)])
+      ;(uber/add-edges [:g2 (choose extra-nodes) (random-weight)])
+      ;(uber/add-edges [(choose extra-nodes) :p1 (random-weight)])
+      ;(uber/add-edges [(choose extra-nodes) :p2 (random-weight)])
       )))
 
 (def empty-genotype
@@ -452,7 +452,7 @@
    :or {generations 20, population-size 20, tourney-size 5,
         f-mutate (partial mutate-n 2), f-cross crossover,
         fitness genotype-fitness, seed 1,
-        radius nil, step 0.005}} ;arguments for fitness-as-seen-by
+        radius nil, step 0.01}} ;arguments for fitness-as-seen-by
           ;make step 0.005 for precise fitness func (it just takes a long time)
   n-mutants (default-to n-mutants (int (* population-size 1.5)))
   n-crosses (default-to n-crosses (int (* population-size 0.5)))
