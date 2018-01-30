@@ -390,6 +390,18 @@
             fitness (w ph)]
         (println x y fitness phx phy)))))
 
+(defn print-fitness-fn
+  "(f [startcoord]) should return [endcoord fitness]."
+  [f & {:keys [step] :or {step 0.005}}]
+  (let [xrange (range -1.0 1.000000000001 step)
+        yrange (range -1.0 1.000000000001 step)]
+    (doseq [x xrange, y yrange]
+      (let [startx (trim-round-off-error x)
+            starty (trim-round-off-error y)
+            startcoord [startx starty]
+            [endcoord fitness] (f [startx starty])]
+        (apply println (concat startcoord [fitness] endcoord))))))
+
 ;IDEA What's the average fitness?
 ;IDEA Look at where the fitness goes varying only one axis at a time.
 ;See the fitness function of x, holding y constant.
@@ -441,6 +453,11 @@
   vfit-file (file (str prefix "vfit"))
     ;fitness-as-seen-by best of last gen
   )
+
+(defn print-phenotype-fitness-fn [& opts]
+  (let-ga-opts opts
+    (with-*out* (writer "phenotype-fitness")
+      (print-fitness-fn (fn [ph] [ph (w ph)])))))
 
 ;(defn run [& {:keys [generations population-size n-mutants n-crosses f-mutate
 ;                     f-cross tourney-size vary select fitness seed]

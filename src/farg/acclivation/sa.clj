@@ -80,7 +80,6 @@
            f-output simple-output, f-newa simple-newa, watch false,
            decay 1.0}}]
   (let [nodes (uber/nodes g)]
-    (dd "SA" nodes)
     (letfn [(weight [g edge]
               (uber/attr g edge edge-weight-key))
             (set-a [g node-or-edge new-a] ;set activation
