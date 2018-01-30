@@ -1,4 +1,4 @@
-(defproject acclivation "0.1.0-SNAPSHOT"
+(defproject farg/acclivation "0.1.0-SNAPSHOT"
   :description "Acclivation laboratory"
   :url "https://github.com/bkovitz/acclivation"
   :license {:name "Eclipse Public License"
