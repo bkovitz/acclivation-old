@@ -3,9 +3,11 @@
   (:require [clojure.tools.trace :refer :all]
             [clojure.pprint :refer [pprint]]
             [clojure.math.numeric-tower :as math]
+            [com.rpl.specter :refer :all]
             [ubergraph.core :as uber]
             [farg.util :refer [dd dde vector-contains?] :as util]
-            [farg.with-state :refer [with-state]]))
+            [farg.with-state :refer [with-state]]
+            [farg.x.navs :refer :all]))
 
 (defn make-sigmoid-fn
   "Returns a logistic function with given center and range, with given
@@ -44,7 +46,7 @@
 (defn a
   "Activation level."
   [g node-or-edge]
-  (uber/attr g node-or-edge :activation))
+  (uber/attr g node-or-edge :a))
 
 (defn node-activations [g]
   (->> g (uber/nodes) (map (fn [node] [node (a g node)])) (into {})))
@@ -117,3 +119,29 @@
         (if (> iter iterations)
             g
             (recur g (one-iteration prev-g g iter) (inc iter)))))))
+
+;;; The new way, as of 2-Feb-2018
+
+(def ^{:doc "Activation"} A (attr :a))
+
+(def decay 0.1)
+
+(defn apply-initial-activations
+  [g initial-activations]
+  (with-state [g g]
+    (doseq [[node new-a] initial-activations]
+      (uber/add-attr node :a new-a))))
+
+(defn incoming-to [gnode]
+  (->> gnode
+    (traverse [IN-EDGES (collect-one WEIGHT) SRC A])
+    (reduce (fn [total [weight a]] (+ total (* weight a))) 0)))
+
+(defn spread-activation
+  [g initial-activations & {:keys [iterations] :or {iterations 1}}]
+  (let [g (transform [NODES VAL A] (fn [[_ node] _] (get initial-activations node 0.0)) g)]
+  (->> g ;(apply-initial-activations g initial-activations)
+    #_(transform [NODES VAL A] (fn [node _] (get initial-activations node 0.0)))
+    (transform [NODES VAL A]
+               (fn [gnode a]
+                 (squash (+ a (* decay (incoming-to gnode)))))))))

@@ -1,6 +1,7 @@
 (ns farg.acclivation
   (:refer-clojure :exclude [rand rand-int cond memoize])
-  (:require [clojure.tools.trace :refer [deftrace] :as trace]
+  (:require [better-cond.core :refer [cond]]
+            [clojure.tools.trace :refer [deftrace] :as trace]
             [clojure.pprint :refer [pprint]]
             [clojure.math.combinatorics :as combo]
             [clojure.math.numeric-tower :as math]
@@ -126,7 +127,7 @@
 (defn w [ph]
   (+ (w12 ph) (w-many-small-hills ph) (w-distance ph)))
 
-(def w (memoize w))
+;(def w (memoize w))
 
 #_(defn w [ph]
   (* #_(w-equal ph) (Math/pow (w-distance ph) 2.0)))
@@ -185,7 +186,7 @@
       (sa/spread-activation (zipmap [:g1 :g2] (:numbers g)) :iterations 20)
       (extract-phenotype)))
 
-(def genotype->phenotype (memoize genotype->phenotype))
+;(def genotype->phenotype (memoize genotype->phenotype))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -330,7 +331,8 @@
 
 (defn dot-edge [graph edge]
   (str (name (:src edge)) " -> " (name (:dest edge)) \space
-       "[label=" (mround (sa/a graph edge)) "]; "))
+       "[label=" (mround (uber/weight graph edge)) "]; "))
+       ;"[label=" (mround (sa/a graph edge)) "]; "))
 
 (defn dot-node [graph node]
   (str (name node) \space "[label=" (mround (sa/a graph node)) "] "))

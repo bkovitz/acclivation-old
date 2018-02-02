@@ -9,6 +9,7 @@
                  [farg/util "0.1.0-SNAPSHOT"]
                  [farg/pmatch "0.1.0-SNAPSHOT"]
                  [farg/with-state "0.0.1-SNAPSHOT"]
+                 [farg/x "0.1.0-SNAPSHOT"]
                  [incanter "1.5.7"]
                  [org.clojure/clojure "1.9.0"]
                  [org.clojure/math.numeric-tower "0.0.4"]
