@@ -503,6 +503,18 @@
 ;          -- (with-*out* (writer vfit-file)
 ;               (fitness-as-seen-by best :radius radius :step step))
           (return best))))))
+;NOTNEXT Output the fitness function of the best individual at the end of
+; each generation. Also output the best individual.
+
+;THEN Run in a higher dimension.
+
+;It might be faster to run the hill-climbers in Clojure, where they have
+;direct access to the fitness function. Then we won't have to calculate
+;all the data points except for the few fitness functions that we want to
+;plot. If we output just the spreading-activation graph, we can read it
+;in again any time we want the function.
+
+;NEXT Hill-climber.
 
 (defn make-article-data
   "Makes all the fitness-func and population data files for the article."
