@@ -1,8 +1,11 @@
 (ns farg.acclivation.hill-test
   (:refer-clojure :exclude [rand rand-int cond memoize])
   (:require [better-cond.core :refer [cond]]
+            [clojure.tools.trace :refer [deftrace] :as trace]
+            [clojure.pprint :refer [pprint]]
             [clojure.test :refer :all]
             [farg.acclivation.hill :refer :all]
+            [farg.util :as util :refer [dd dde]]
             [farg.with-state :refer [with-state]]))
 
 (deftest test-lazy-deterministic-shuffled-indices
@@ -35,8 +38,12 @@
          [[-0.5 -1.0] [0.5 -1.0] [0.0 -0.5]])))
 
 (defn simple-f
-  "Simple hill-shaped fitness function. Peak at [0 0]."
-  [[x0 x1]] (+ (- (Math/abs x0)) (- (Math/abs x1))))
+  "Simple hill-shaped fitness function. Peak at origin."
+  [xx]
+  (->> xx
+       (map #(- (Math/abs %)))
+       (reduce +)))
+  ;[[x0 x1]] (+ (- (Math/abs x0)) (- (Math/abs x1))))
 
 (deftest test-hill-step
   (is (= (hill-step simple-f 0.5 [-1.0 -1.0])
@@ -45,3 +52,24 @@
          [-1.0 0.0]))
   (is (= (hill-step simple-f 0.5 [0.0 0.0])
          [0.0 0.0])))
+
+(deftest test-hill-climb
+  (is (= (hill-climb simple-f 0.2 [-1.0 -1.0])
+         ;fitness  start xx    final xx
+         [0.0      [-1.0 -1.0] [0.0 0.0]])))
+
+(deftest test-deterministic-random-xxs
+  (let [expect [[0.8 1.0] [-0.6 -0.8] [-0.9 -0.4] [-1.0 0.4]]]
+    (is (= (take 4 (deterministic-random-xxs 0.1 2))
+           expect))
+    (is (= (take 4 (deterministic-random-xxs 0.1 2))
+           expect))))
+
+(deftest test-run-climbers
+  (let [expect [[0.0 [0.8 1.0 -0.2 -0.1] [0.0 0.0 0.0 0.0]]
+                [0.0 [-0.6 -0.8 -0.6 -0.1] [0.0 0.0 0.0 0.0]]
+                [0.0 [-0.9 -0.4 -0.1 -0.7] [0.0 0.0 0.0 0.0]]
+                [0.0 [-1.0 0.4 -1.0 -1.0] [0.0 0.0 0.0 0.0]]
+                [0.0 [1.0 0.1 0.8 0.2] [0.0 0.0 0.0 0.0]]]]
+    (is (= expect (run-climbers simple-f 0.1 4 5)))
+    (is (= expect (run-climbers simple-f 0.1 4 5)))))
