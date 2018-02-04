@@ -72,22 +72,67 @@
          (update xx n #(normalize (direction % step))))
        (filter in-range?)))
 
+(defn- update-best [f [bests best-fitness :as prev] xx]
+  (cond
+    :let [fitness (f xx)]
+    (empty? bests)
+      [#{xx} fitness]
+    (< fitness best-fitness)
+      prev
+    (= fitness best-fitness)
+      [(conj bests xx) best-fitness]
+    [#{xx} fitness]))
+
 (defn hill-step
-  "Returns point with highest f within one step of xx. If none have higher
-  f than xx, returns xx."
+  "Returns point with highest f within one step of xx. If there's a tie
+  between xx and another point, returns the other point (chosen arbitrarily
+  but deterministically if more than one other point has the same fitness)."
   [f step xx]
-  (let [new-xx (apply max-key f (all-steps step xx))]
-    (if (> (f new-xx) (f xx)) new-xx xx)))
+  (let [start-fitness (f xx)]
+    (letfn [(update-best [[bests best-fitness :as prev] xx]
+              (cond
+                :let [fitness (f xx)]
+                (< fitness start-fitness)
+                  prev
+                (empty? bests)
+                  [#{xx} fitness]
+                (< fitness best-fitness)
+                  prev
+                (= fitness best-fitness)
+                  [(conj bests xx) best-fitness]
+                [#{xx} fitness]))]
+      (let [[better-neighbors _] (reduce update-best
+                                         [nil nil]
+                                         (all-steps step xx))]
+        (if (empty? better-neighbors)
+          xx  ;local optimum
+          (first better-neighbors))))))
 
 (defn hill-climb
-  "Hill-climbs 'f', one 'step' at a time, starting at 'xx'. Returns
-  [best-fitness start-xx best-xx]."
+  "Hill-climbs 'f', one 'step' at a time, starting at 'xx'. Stops climbing
+  when reaching a local optimum, or, on a neutral plateau, when either
+  the same point has been reached 5 times or fitness has not improved for
+  1000 steps.  Returns [best-fitness n-steps start-xx best-xx]."
   [f step start-xx]
-  (loop [best-fitness (f start-xx), xx start-xx]
+  (loop [best-fitness (f start-xx)
+         n-steps 0
+         xx start-xx
+         seen-before {}
+         n-same-fitness 0]
     (let [new-xx (hill-step f step xx)]
-      (if (= xx new-xx)
-        [(normalize best-fitness) start-xx xx]
-        (recur (f new-xx) new-xx)))))
+      (cond
+        (= xx new-xx) ;hill-step didn't move: local optimum
+          [best-fitness n-steps start-xx xx]
+        :let [new-fitness (f new-xx)]
+        (not= new-fitness best-fitness)
+          (recur new-fitness (inc n-steps) new-xx {} 0)
+        (or (>= (get seen-before new-xx 0) 5)
+            (>= n-same-fitness 1000))
+          [best-fitness n-steps start-xx new-xx]
+        (recur best-fitness new-xx
+               (inc n-steps)
+               (update seen-before new-xx (fnil inc 0))
+               (inc n-same-fitness))))))
 
 (defn run-climbers
   [f step dimension n-climbers]

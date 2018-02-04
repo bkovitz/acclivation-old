@@ -12,6 +12,7 @@
              :as util]
             [farg.with-state :refer [with-state]]
             [farg.acclivation.sa :as sa]
+            [farg.acclivation.hill :as hill]
             [potemkin :refer [fast-memoize] :rename {fast-memoize memoize}]
             [ubergraph.core :as uber])
   (:gen-class))
@@ -70,6 +71,10 @@
       (with-meta {:type :acclivation})))
 
 (def edn-readers {'farg.acclivation/genotype map->genotype})
+
+(defn edn-slurp [file]
+  (clojure.edn/read {:readers edn-readers}
+    (java.io.PushbackReader. (io/reader file))))
 
 ;;; print-method ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -502,6 +507,17 @@
             y (trim-round-off-error y)
             fitness (w [x y])]
         (println x y fitness x y)))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn acclivity [f step dimension n-climbers]
+  (let [all-results (hill/run-climbers f step dimension n-climbers)]
+    (run! println all-results)
+    (util/average (map first all-results))))
+
+(defn genotype-acclivity [genotype step dimension n-climbers]
+  (let [vfn (virtual-fitness-fn genotype)]
+    (acclivity #(second (vfn %)) step dimension n-climbers)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

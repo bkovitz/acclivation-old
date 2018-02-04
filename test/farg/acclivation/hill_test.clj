@@ -43,20 +43,17 @@
   (->> xx
        (map #(- (Math/abs %)))
        (reduce +)))
-  ;[[x0 x1]] (+ (- (Math/abs x0)) (- (Math/abs x1))))
 
 (deftest test-hill-step
-  (is (= (hill-step simple-f 0.5 [-1.0 -1.0])
-         [-1.0 -0.5]))
-  (is (= (hill-step simple-f 0.5 [-1.0 -0.5])
-         [-1.0 0.0]))
+  (is (#{[-0.5 -1.0] [-1.0 -0.5]} (hill-step simple-f 0.5 [-1.0 -1.0])))
+  (is (#{[-1.0 0.0] [-0.5 -0.5]} (hill-step simple-f 0.5 [-1.0 -0.5])))
   (is (= (hill-step simple-f 0.5 [0.0 0.0])
          [0.0 0.0])))
 
 (deftest test-hill-climb
   (is (= (hill-climb simple-f 0.2 [-1.0 -1.0])
-         ;fitness  start xx    final xx
-         [0.0      [-1.0 -1.0] [0.0 0.0]])))
+         ;fitness  n-steps  start xx    final xx
+         [0.0      10       [-1.0 -1.0] [0.0 0.0]])))
 
 (deftest test-deterministic-random-xxs
   (let [expect [[0.8 1.0] [-0.6 -0.8] [-0.9 -0.4] [-1.0 0.4]]]
@@ -66,10 +63,10 @@
            expect))))
 
 (deftest test-run-climbers
-  (let [expect [[0.0 [0.8 1.0 -0.2 -0.1] [0.0 0.0 0.0 0.0]]
-                [0.0 [-0.6 -0.8 -0.6 -0.1] [0.0 0.0 0.0 0.0]]
-                [0.0 [-0.9 -0.4 -0.1 -0.7] [0.0 0.0 0.0 0.0]]
-                [0.0 [-1.0 0.4 -1.0 -1.0] [0.0 0.0 0.0 0.0]]
-                [0.0 [1.0 0.1 0.8 0.2] [0.0 0.0 0.0 0.0]]]]
+  (let [expect [[0.0 21 [0.8 1.0 -0.2 -0.1] [0.0 0.0 0.0 0.0]]
+                [0.0 21 [-0.6 -0.8 -0.6 -0.1] [0.0 0.0 0.0 0.0]]
+                [0.0 21 [-0.9 -0.4 -0.1 -0.7] [0.0 0.0 0.0 0.0]]
+                [0.0 34 [-1.0 0.4 -1.0 -1.0] [0.0 0.0 0.0 0.0]]
+                [0.0 21 [1.0 0.1 0.8 0.2] [0.0 0.0 0.0 0.0]]]]
     (is (= expect (run-climbers simple-f 0.1 4 5)))
     (is (= expect (run-climbers simple-f 0.1 4 5)))))
