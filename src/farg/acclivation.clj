@@ -5,7 +5,7 @@
             [clojure.pprint :refer [pprint]]
             [clojure.math.combinatorics :as combo]
             [clojure.math.numeric-tower :as math]
-            [clojure.java.io :refer [file writer]]
+            [clojure.java.io :as io :refer [file writer]]
             [clj-time.local :as ltime]
             [farg.util :refer [dd dde choose choose-one with-rng-seed mround
                                defopts with-*out*]
@@ -33,9 +33,45 @@
 (def ^:dynamic *w*)  ;phenotype fitness
 (def ^:dynamic *genotype->phenotype*)
 (def ^:dynamic *pop-file* *out*) ;output file for population
+(def ^:dynamic *data-directory* (io/file "."))
+(def ^:dynamic *best-genotype-file*)
 
 (defn strip-type [x]
   (vary-meta x dissoc :type))
+
+;;; edn ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn strip-type [x]
+  (vary-meta x #(dissoc % :type)))
+
+(defn edge->vec [g e]
+  [(uber/src e) (uber/dest e) (uber/attr g e :weight)])
+
+(defn graph->map [g]
+  {:nodes (->> g uber/nodes vec)
+   :edges (->> g uber/edges (map #(edge->vec g %)))})
+
+(defn map->graph [m]
+  (with-state [g (uber/digraph)]
+    (doseq [node (:nodes m)]
+      (uber/add-nodes node))
+    (uber/add-edges* (:edges m))))
+
+(defn genotype->edn [gt]
+  (str "#farg.acclivation/genotype"
+       (-> gt
+           strip-type
+           (update :graph graph->map)
+           prn-str)))
+
+(defn map->genotype [m]
+  (-> m
+      (update :graph map->graph)
+      (with-meta {:type :acclivation})))
+
+(def edn-readers {'farg.acclivation/genotype map->genotype})
+
+;;; print-method ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn graph-cstr [graph]
   (str (sort (uber/nodes graph)) \space
@@ -60,7 +96,7 @@
 (defn convenient-str ^String [x]
   (if (map? x)
       (case (:type x)
-        :genotype (genotype-cstr x)
+        :genotype (genotype->edn x) ;(genotype-cstr x)
         :population (population-cstr x)
         (apply str (strip-type x)))
       (apply str (strip-type x))))
@@ -114,8 +150,12 @@
   (* (w-ratio ph) (w2 ph)))
 
 (defn w-many-small-hills [[x1 x2]]
-  (* 2 (Math/cos (* 30 x1))
-       (Math/sin (* 30 x2))))
+  (* (Math/cos (* 30 x1))
+     (Math/sin (* 30 x2))))
+
+(defn w-harsh-small-hills [xx]
+  (let [y (w-many-small-hills xx)]
+    (if (< y 0.8) 0.0 (* 2 y))))
 
 (defn w-distance [[x1 x2]]
   (let [center [0.2 0.2]
@@ -125,7 +165,9 @@
     ))
 
 (defn w [ph]
-  (+ (w12 ph) (w-many-small-hills ph) (w-distance ph)))
+  (if (some zero? ph)
+    -10.0
+    (+ (w12 ph) (w-harsh-small-hills ph) (w-distance ph))))
 
 ;(def w (memoize w))
 
@@ -171,6 +213,7 @@
   ^{:type :acclivation}
   {:type :population
    :generation 0
+   :history []
    :epoch 1})
 
 (defn make-random-population [n]
@@ -190,10 +233,18 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn clamp [x]
+  (util/clamp [-1.0 1.0] x))
+
 (defn turn-knob [g]
   (let [i (choose [0 1])
         Δ (util/rand -0.02 0.02)]
     (update-in g [:numbers i] #(sa/squash (+ % Δ)))))
+
+(defn turn-knob [g]
+  (let [i (choose [0 1])
+        Δ (* 0.01 (util/sample-normal))]
+    (update-in g [:numbers i] #(clamp (+ % Δ)))))
 
 (defn n-node? [node]
   {:pre [(keyword? node)]}
@@ -285,6 +336,11 @@
             :numbers [n1 n2]
             :graph graph)]))
 
+(defn crossover [g1 g2]
+  [(assoc empty-genotype
+          :numbers (:numbers g1)
+          :graph (:graph g2))])
+
 (defn random-pair [coll]
   (util/choose-without-replacement 2 coll))
 
@@ -311,10 +367,12 @@
 ;     (apply max-key :fitness contestants)]))
 
 (defn tournament-selection-on-population [f-fitness n p]
-  (loop [winners #{}]
-    (if (>= (count winners) (:population-size p))
+  (loop [winners #{}, n-tries 0]
+    (if (or (>= (count winners) (:population-size p))
+            (>= n-tries (* 2 (:population-size p))))
         (assoc p :individuals winners)
-        (recur (conj winners (tournament-selection f-fitness n p))))))
+        (recur (conj winners (tournament-selection f-fitness n p))
+               (inc n-tries)))))
 
 (defn next-generation [vary select population]
   (-> population
@@ -366,6 +424,9 @@
   (let [p (update p :individuals #(map add-fitness %))
         individuals (sort-by :fitness (:individuals p))]
     (last individuals)))
+
+(defn best-fitness-of [p]
+  (:fitness (best-of p)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -450,23 +511,28 @@
 (defopts let-ga-opts
   {:keys [generations population-size n-mutants n-crosses f-mutate
                      f-cross tourney-size vary select fitness seed
-                     radius step]
-   :or {generations 20, population-size 20, tourney-size 5,
+                     radius step dimension]
+   :or {generations 30, population-size 40, tourney-size 7,
         f-mutate (partial mutate-n 2), f-cross crossover,
-        fitness genotype-fitness, seed 1,
+        fitness genotype-fitness, seed 1, dimension 2,
         radius nil, step 0.01}} ;arguments for fitness-as-seen-by
           ;make step 0.005 for precise fitness func (it just takes a long time)
-  n-mutants (default-to n-mutants (int (* population-size 1.5)))
-  n-crosses (default-to n-crosses (int (* population-size 0.5)))
+  n-mutants (default-to n-mutants (int (* population-size 0.81)))
+  n-crosses (default-to n-crosses (int (* population-size 0.21)))
   vary (default-to vary (partial mutate-and-crossover f-mutate f-cross
                                  n-mutants n-crosses))
   select (partial tournament-selection-on-population fitness tourney-size)
   next-gen (partial next-generation vary select)
-  prefix (str "seed" seed "-") ;prefix for output filenames
-  pop-file (file (str prefix "pop"))
-    ;population of each generation
-  vfit-file (file (str prefix "vfit"))
-    ;fitness-as-seen-by best of last gen
+  data-directory (io/file (str "seed" seed "-d" dimension))
+;  best-genotype-file (io/file dirname "best-genotype")
+;  best-fitness-file (io/file dirname "best-fitness")
+;  hill-climbers-file (io/file dirname "hill-climbers")
+;  generations-file (io/file dirname "generation")
+;  prefix (str "seed" seed "-") ;prefix for output filenames
+;  pop-file (file (str prefix "pop"))
+;    ;population of each generation
+;  vfit-file (file (str prefix "vfit"))
+;    ;fitness-as-seen-by best of last gen
   )
 
 (defn print-phenotype-fitness-fn [& opts]
@@ -474,34 +540,53 @@
     (with-*out* (writer "phenotype-fitness")
       (print-fitness-fn (fn [ph] [ph (w ph)])))))
 
-;(defn run [& {:keys [generations population-size n-mutants n-crosses f-mutate
-;                     f-cross tourney-size vary select fitness seed]
-;              :or {generations 20, population-size 40, tourney-size 5,
-;                   f-mutate (partial mutate-n 2), f-cross crossover,
-;                   fitness genotype-fitness, seed 1}}]
-;  (let [n-mutants (default-to n-mutants (int (* population-size 1.5)))
-;        n-crosses (default-to n-crosses (int (* population-size 0.5)))
-;        vary (default-to vary (partial mutate-and-crossover f-mutate f-cross
-;                                       n-mutants n-crosses))
-;        select (partial tournament-selection-on-population fitness tourney-size)
-;        next-gen (partial next-generation vary select)]
+(defn save-gen-data [{:keys [generation] :as population}]
+  (let [data-file (io/file *data-directory*
+                          (str "best-genotype-gen" generation))
+        best-genotype (best-of population)]
+    (io/make-parents data-file)
+    (with-*out* (writer data-file)
+      (prn best-genotype))
+))
+
+;  (let [population (update :individuals sort-by :fitness)
+;  (with-*out* (writer (io/file *data-directory* "best-genotype"))
+;    (pr 
+
+
+;(defn results-map [{:keys [individuals] :as population}]
+;  ^{:type :acclivation}
+;  (let [best-genotype (best-of population)]
+;    {:population population
+;     :best-genotype best-genotype
+;     :best-fitnesses
+
+(defn accumulate-data [{:keys [generation] :as population}]
+  (update population :history conj (best-fitness-of population)))
+  
 (defn run [& opts]
   (let-ga-opts opts
-    (println "Sending output to" (.getName pop-file) (.getName vfit-file) "...")
-    (binding [*w* w
-              *genotype->phenotype* genotype->phenotype
-              *pop-file* (writer pop-file)]
+    (binding [*data-directory* data-directory
+              *w* (memoize w)
+              *genotype->phenotype* (memoize genotype->phenotype)]
       (with-rng-seed seed
+        (println (str "seed=" seed))
         (with-state [p (make-random-population population-size)]
-          -- (print-population p)
+          (accumulate-data)
+          -- (save-gen-data p)
+          ;-- (print-population p)
           (dotimes [i generations]
             (next-gen)
-            -- (print-population p))
+            (accumulate-data)
+            -- (save-gen-data p)
+            ;-- (print-population p)
+            )
           (bind best (best-of p))
-          -- (with-*out* (writer vfit-file)
-               (print-fitness-fn (virtual-fitness-fn best) :step step))
+;          -- (with-*out* (writer vfit-file)
+;               (print-fitness-fn (virtual-fitness-fn best) :step step))
 ;          -- (with-*out* (writer vfit-file)
 ;               (fitness-as-seen-by best :radius radius :step step))
+          -- (run! println (:history p))
           (return best))))))
 ;NOTNEXT Output the fitness function of the best individual at the end of
 ; each generation. Also output the best individual.
