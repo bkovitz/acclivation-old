@@ -651,6 +651,9 @@
           w (get-w gt')]
       (w ph))))
 
+(defn save-vfn [genotype filename]
+  (save-fn (vfn genotype) filename))
+
 (defn genotype-acclivity
  ([genotype]
   (genotype-acclivity genotype 0.01 2 20))
@@ -785,6 +788,13 @@
           (doseq [epoch (range 1 (inc n-epochs))]
             (run-epoch epoch opts))
           (return (best-of p)))))))
+
+(defn run-and-save [& opts]
+  (let [winning-genotype (run opts)]
+    (spit "winner.dot" (dot winning-genotype))
+    (with-*out* (io/writer "winner.acclivity")
+      (run! println (hill/run-climbers (vfn winning-genotype))))
+    (save-vfn winning-genotype "winner.vfn")))
 
 (defn make-article-data
   "Makes all the fitness-func and population data files for the article."

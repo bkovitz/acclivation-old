@@ -27,6 +27,9 @@ acclivation.pdf: papers.bib
 %.pdf: %.data mkplot.gpi mkplots
 	./mkplots
 
+run1:
+	lein run -m farg.acclivation/run-and-save :generations 20 :n-epochs 10 :seed 1
+
 tags:
 	ctags -R src/ checkouts/
 
