@@ -76,7 +76,8 @@
   (->> (map #(normalize (+ %1 %2)) xx yy)
        vec))
 
-(defn all-steps
+#_(defn all-steps
+  "all-steps for steepest ascent (diagonal moves allowed)."
   [step xx]
   (->> (repeat (count xx) [(- step) 0.0 (+ step)])
        (apply combo/cartesian-product)

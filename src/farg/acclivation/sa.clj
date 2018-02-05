@@ -139,9 +139,20 @@
 
 (defn spread-activation
   [g initial-activations & {:keys [iterations] :or {iterations 1}}]
-  (let [g (transform [NODES VAL A] (fn [[_ node] _] (get initial-activations node 0.0)) g)]
-  (->> g ;(apply-initial-activations g initial-activations)
-    #_(transform [NODES VAL A] (fn [node _] (get initial-activations node 0.0)))
-    (transform [NODES VAL A]
-               (fn [gnode a]
-                 (squash (+ a (* decay (incoming-to gnode)))))))))
+  (let [g0 (transform [NODES VAL A]
+             (fn [[_ node] _]
+               (get initial-activations node 0.0))
+             g)]
+    (reduce (fn [g iteration] (transform [NODES VAL A]
+                (fn [gnode a]
+                  (squash (+ a (* decay (incoming-to gnode)))))
+                g))
+            g0
+            (range iterations))))
+          
+;  (let [g (transform [NODES VAL A] (fn [[_ node] _] (get initial-activations node 0.0)) g)]
+;  #_(->> g ;(apply-initial-activations g initial-activations)
+;    #_(transform [NODES VAL A] (fn [node _] (get initial-activations node 0.0)))
+;    (transform [NODES VAL A]
+;               (fn [gnode a]
+;                 (squash (+ a (* decay (incoming-to gnode)))))))

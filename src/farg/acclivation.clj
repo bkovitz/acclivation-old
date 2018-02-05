@@ -41,6 +41,14 @@
 (def ^:dynamic *data-directory* (io/file "."))
 (def ^:dynamic *best-genotype-file*)
 
+(def lastpop (atom nil))
+
+(defn printpop
+ ([] (printpop @lastpop))
+ ([p]
+  (run! println (:individuals p))
+  (run! println (:history p))))
+
 (defn default-to [x default]
   (if (some? x) x default))
 
@@ -143,14 +151,21 @@
 #_(defn w [ph]
   (* #_(w-equal ph) (Math/pow (w-distance ph) 2.0)))
 
-;(def w (memoize w))
+(defn make-w [c]
+  (fn [ph]
+    (+ (w-many-small-hills ph)
+       (- 1.0 (util/distance [c c] ph)))))
+
+(defn make-epoch-w
+  "Returns [w w-source] where w is a randomly generated phenotype fitness
+  function and w-source is the source code that generates it."
+  []
+  (let [c (rand -1.0 +1.0)
+        w-source `(make-w ~c)
+        w (eval w-source)]
+    [w w-source]))
 
 (def ^:dynamic *w* w)  ;phenotype fitness
-
-(defn make-epoch-w []
-  ;TODO Randomly make new constants, or whatever
-  (dd "HERE")
-  *w*)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -195,17 +210,34 @@
    :history []
    :epoch 1})
 
+(defn add-w-source [population g]
+  (assoc g :w-source (:w-source population)))
+
+(defn add-w-source-to-everybody [population]
+  (update population :individuals (fn [individuals]
+                                    (map #(add-w-source population %)
+                                         individuals))))
+
+(defn get-w [{:keys [w-source]}]
+  (eval w-source))
+
 (defn make-random-population [population n]
   (assoc population
-         :individuals (vec (take n (repeatedly make-random-genotype)))
+         :individuals (->> (repeatedly make-random-genotype)
+                           (map #(add-w-source population %))
+                           (take n)
+                           vec)
          :population-size n))
 
 (defn extract-phenotype [g]
   [(sa/a g :p1) (sa/a g :p2)])
 
-(defn genotype->phenotype [g]
+(defn spread-activation [g]
   (-> (:graph g)
-      (sa/spread-activation (zipmap [:g1 :g2] (:numbers g)) :iterations 20)
+      (sa/spread-activation (zipmap [:g1 :g2] (:numbers g)) :iterations 20)))
+
+(defn genotype->phenotype [g]
+  (-> (spread-activation g)
       (extract-phenotype)))
 
 ;(def genotype->phenotype (memoize genotype->phenotype))
@@ -368,10 +400,12 @@
   (let [parents (:individuals p)
         mutants (->> (repeatedly #(choose parents))
                      (mapcat #(mutate %))
-                     (take n-by-mutation))
+                     (take n-by-mutation)
+                     vec)
         crosses (->> (repeatedly #(random-pair parents))
                      (mapcat #(apply crossover %))
-                     (take n-by-crossover))]
+                     (take n-by-crossover)
+                     vec)]
     (assoc p :individuals (into mutants crosses))))
 
 (defn tournament-selection
@@ -400,9 +434,17 @@
       select
       (update :generation inc)))
 
+(defn penalize-zeros [w ph]
+  (if (some zero? ph)
+    -10.0
+    (w ph)))
+
 (defn genotype-fitness [g]
-  (->> (genotype->phenotype g)
-       (w)))
+  (let [w (get-w g)
+        _ (assert (some? w) "Need phenotype fitness function")
+        w #(penalize-zeros w %)]
+    (->> (genotype->phenotype g)
+         (w))))
 
 ;;; dot ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -423,11 +465,11 @@
        (apply str (map #(dot-edge graph %) (uber/edges graph)))
        "}"))
 
-(defn print-genotype-graph [g]
-  (let [graph (sa/spread-activation (:graph g)
-                                    (zipmap [:g1 :g2] (:numbers g))
-                                    :iterations 20)]
-    (println (make-dot graph))))
+(defn dot [genotype]
+  (->> genotype spread-activation make-dot))
+
+(defn print-genotype-graph [genotype]
+  (println (dot genotype)))
 
 ;;; print-method ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -481,7 +523,8 @@
 (defn best-of [p]
   (let [p (update p :individuals #(map add-fitness %))
         individuals (sort-by :fitness (:individuals p))]
-    (last individuals)))
+    (->> (last individuals)
+         (add-w-source p))))
 
 (defn best-fitness-of [p]
   (:fitness (best-of p)))
@@ -526,6 +569,24 @@
             [endcoord fitness] (f [startx starty])]
         (apply println (concat startcoord [fitness] endcoord))))))
 
+(defn normalize [x]
+  (if (zero? x)
+    0.0  ;force 0.0; prevent -0.0
+    (-> x (* 100000) (Math/round) (/ 100000.0))))
+
+(def normalized-range
+  (->> (range -1.0 +1.0000000001 0.01)
+       (map normalize)
+       vec))
+
+(defn print-fn [f]
+  (doseq [x normalized-range, y normalized-range]
+    (println x y (f [x y]))))
+
+(defn save-fn [f filename]
+  (with-*out* (io/writer filename)
+    (print-fn f)))
+
 (defn virtual-fitness-fn
   "Returns the fitness function f seen by the \"numbers\" part of genotype g.
   (f [startcoord]) returns [endcoord fitness], where endcoord is the phenotype
@@ -565,14 +626,28 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn acclivity [f step dimension n-climbers]
+(defn acclivity
+ ([f]
+  (acclivity f 0.01 2 20))
+ ([f step dimension n-climbers]
   (let [all-results (hill/run-climbers f step dimension n-climbers)]
     (run! println all-results)
-    (util/average (map first all-results))))
+    (util/average (map first all-results)))))
 
-(defn genotype-acclivity [genotype step dimension n-climbers]
-  (let [vfn (virtual-fitness-fn genotype)]
-    (acclivity (vfn genotype) step dimension n-climbers)))
+(defn vfn
+  "Return's genotype gt's virtual fitness function."
+  [gt]
+  (fn [xx]
+    (let [gt' (assoc gt :numbers xx)
+          ph (genotype->phenotype gt')
+          w (get-w gt')]
+      (w ph))))
+
+(defn genotype-acclivity
+ ([genotype]
+  (genotype-acclivity genotype 0.01 2 20))
+ ([genotype step dimension n-climbers]
+  (acclivity (vfn genotype) step dimension n-climbers)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -589,10 +664,11 @@
         radius nil, step 0.01}} ;arguments for fitness-as-seen-by
           ;make step 0.005 for precise fitness func (it just takes a long time)
   n-mutants (default-to n-mutants (int (* population-size 0.81)))
-  n-crosses (default-to n-crosses (int (* population-size 0.21)))
+  n-crosses (default-to n-crosses (- population-size n-mutants))
   vary (default-to vary (partial mutate-and-crossover f-mutate f-cross
                                  n-mutants n-crosses))
-  select (partial tournament-selection-on-population fitness tourney-size)
+  ;select (partial tournament-selection-on-population fitness tourney-size)
+  select identity
   next-gen (partial next-generation vary select)
   data-directory (io/file (str "seed" seed "-d" dimension))
 ;  best-genotype-file (io/file dirname "best-genotype")
@@ -634,18 +710,14 @@
 ;     :best-genotype best-genotype
 ;     :best-fitnesses
 
-(def lastpop (atom nil))
-
-(defn printpop
- ([] (printpop @lastpop))
- ([p]
-  (run! println (:individuals p))
-  (run! println (:history p))))
-
 (defn accumulate-data [{:keys [generation] :as population}]
-  (update population :individuals #(map add-fitness %))
-  (reset! lastpop population)
-  (update population :history conj (best-fitness-of population)))
+  (with-state [population population]
+    (update :individuals #(map add-fitness %))
+    add-w-source-to-everybody
+    ;(update :individuals #(map add-w-source population %))
+    (update :history conj (best-fitness-of population))
+    -- (reset! lastpop population)
+    ))
   
 #_(defn run [& opts]
   (let-ga-opts opts
@@ -678,19 +750,19 @@
 
 (defn run-epoch [start-population epoch & opts]
   (let-ga-opts opts
-    (binding [*w* (memoize (make-epoch-w))]
-      (with-state [p start-population]
-        ;TODO Store *w* in p?
-        (assoc :epoch epoch :generation 0)
-        (when (empty? (:individuals p))
-          (make-random-population population-size))
-        (accumulate-data)
-        -- (save-gen-data p)
-        (doseq [generation (range 1 (inc generations))]
-          (assoc :generation generation)
-          (next-gen)
+    (let [[w w-source] (make-epoch-w)]
+      (binding [*w* (memoize w)]
+        (with-state [p start-population]
+          (assoc :epoch epoch, :generation 0, :w-source w-source)
+          (when (empty? (:individuals p))
+            (make-random-population population-size))
           (accumulate-data)
-          -- (save-gen-data p))))))
+          -- (save-gen-data p)
+          (doseq [generation (range 1 (inc generations))]
+            (assoc :generation generation)
+            (next-gen)
+            (accumulate-data)
+            -- (save-gen-data p)))))))
 
 (defn run [& opts]
   (let-ga-opts opts
