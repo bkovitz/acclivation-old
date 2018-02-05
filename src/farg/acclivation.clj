@@ -7,8 +7,8 @@
             [clojure.math.numeric-tower :as math]
             [clojure.java.io :as io :refer [file writer]]
             [clj-time.local :as ltime]
-            [farg.util :refer [dd dde choose choose-one with-rng-seed mround
-                               defopts with-*out*]
+            [farg.util :refer [dd dde rand choose choose-one with-rng-seed
+                               mround defopts with-*out*]
              :as util]
             [farg.with-state :refer [with-state]]
             [farg.acclivation.sa :as sa]
@@ -29,13 +29,20 @@
 ; genotype->phenotype  DONE
 ; mutate  DONE
 ; nextgen  DONE
-; run-epoch
 
-(def ^:dynamic *w*)  ;phenotype fitness
-(def ^:dynamic *genotype->phenotype*)
+; save pop in atom DONE
+; fitness function with a "ridge": changing optimal value for x1
+; run-epoch
+; vary optimal spot on ridge each epoch
+
+(declare add-fitness)
+
 (def ^:dynamic *pop-file* *out*) ;output file for population
 (def ^:dynamic *data-directory* (io/file "."))
 (def ^:dynamic *best-genotype-file*)
+
+(defn default-to [x default]
+  (if (some? x) x default))
 
 (defn strip-type [x]
   (vary-meta x dissoc :type))
@@ -76,54 +83,6 @@
   (clojure.edn/read {:readers edn-readers}
     (java.io.PushbackReader. (io/reader file))))
 
-;;; print-method ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defn graph-cstr [graph]
-  (str (sort (uber/nodes graph)) \space
-       (uber/count-edges graph) " edges"))
-
-(defn genotype-cstr [g]
-  (str (-> (strip-type g)
-           (select-keys [:numbers :phenotype :fitness])) \space
-       (graph-cstr (:graph g))))
-
-;  (let [graph (:graph g)
-;        g-numbers (:numbers g)
-;        ph-numbers (:phenotype g)]
-;    (str (:numbers g) \space
-;         (util/nilstr ph-numbers) \space
-;         (graph-cstr graph))))
-
-(defn population-cstr [p]
-  (str (strip-type (select-keys p [:generation :epoch])) \newline
-       (count (:individuals p))))
-
-(defn convenient-str ^String [x]
-  (if (map? x)
-      (case (:type x)
-        :genotype (genotype->edn x) ;(genotype-cstr x)
-        :population (population-cstr x)
-        (apply str (strip-type x)))
-      (apply str (strip-type x))))
-
-(defmethod print-method :acclivation [v ^java.io.Writer w]
-  (.write w (convenient-str v)))
-
-(defn add-phenotype [g]
-  (if (contains? g :phenotype)
-      g
-      (assoc g :phenotype (*genotype->phenotype* g))))
-
-(defn add-fitness [g]
-  (let [g (add-phenotype g)]
-    (if (contains? g :fitness)
-        g
-        (assoc g :fitness (*w* (:phenotype g))))))
-
-(defn genotype-str [g]
-  (->> (add-fitness g)
-       (genotype-cstr)))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn make-inverted-v [target radius]
@@ -140,7 +99,7 @@
     (invv (Math/abs (- x1 x2)))))
 
 (def w-ratio
-  (let [invv (make-inverted-v 1.50 0.5)]
+  (let [invv (make-inverted-v 1.50 0.1)]
     (fn [[x1 x2]]
       (if (zero? x1)
           0.0
@@ -149,35 +108,49 @@
 (def w2
   (let [near1 (util/piecewise-linear 0.0 0.0, 1.0 1.0, 1.0 0.0)]
     (fn [[x1 x2]]
-      (* 5 (+ (near1 x1) (near1 x2))))))
+      (+ (near1 x1) (near1 x2)))))
 
 (defn w12 [ph]
   (* (w-ratio ph) (w2 ph)))
+
+(def some-points
+  (with-rng-seed 1
+    (vec (repeatedly 20 #(vector (rand -1.0 +1.0) (rand -1.0 +1.0))))))
 
 (defn w-many-small-hills [[x1 x2]]
   (* (Math/cos (* 30 x1))
      (Math/sin (* 30 x2))))
 
-(defn w-harsh-small-hills [xx]
-  (let [y (w-many-small-hills xx)]
-    (if (< y 0.8) 0.0 (* 2 y))))
-
 (defn w-distance [[x1 x2]]
-  (let [center [0.2 0.2]
+  (let [center [-0.43 0.67]
         invv (make-inverted-v 0.0 0.5)]
     #_(* 5.0 (invv (util/distance [x1 x2] center)))
-    (- 2.0 (util/distance [x1 x2] center))
+    (- 1.0 (util/distance [x1 x2] center))
     ))
 
 (defn w [ph]
-  (if (some zero? ph)
-    -10.0
-    (+ (w12 ph) (w-harsh-small-hills ph) (w-distance ph))))
+  (+ (w12 ph) (w-many-small-hills ph) (w-distance ph)))
 
-;(def w (memoize w))
+(defn w [ph]
+  (if (some #(< (Math/abs %) 0.02) ph)
+    0.0
+    (+ (w-many-small-hills ph)
+       (* 9.0 (w12 ph) (w-distance ph)))))
+
+(defn w [ph]
+  (+ (w-many-small-hills ph) (w-distance ph)))
 
 #_(defn w [ph]
   (* #_(w-equal ph) (Math/pow (w-distance ph) 2.0)))
+
+;(def w (memoize w))
+
+(def ^:dynamic *w* w)  ;phenotype fitness
+
+(defn make-epoch-w []
+  ;TODO Randomly make new constants, or whatever
+  (dd "HERE")
+  *w*)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -189,20 +162,20 @@
   (choose-one -1.0 1.0))
 
 (defn make-random-graph []
-  (let [n-extra-nodes (util/rand-int 2 10)
+  (let [n-extra-nodes (util/rand-int 1 5)
         extra-nodes (->> (take n-extra-nodes (iterate inc 1))
                          (map make-node))
         nodes (into [:g1 :g2 :p1 :p2] extra-nodes)
-        n-edges (util/rand-int 5 (* 3 (count nodes)))]
+        n-edges (util/rand-int 5 (* 5 (count nodes)))]
     (with-state [g (apply uber/digraph nodes)]
       (dotimes [n n-edges]
         (bind [from to] (util/choose-with-replacement 2 nodes))
         (bind weight (random-weight))
         (uber/add-edges [from to weight]))
-      ;(uber/add-edges [:g1 (choose extra-nodes) (random-weight)])
-      ;(uber/add-edges [:g2 (choose extra-nodes) (random-weight)])
-      ;(uber/add-edges [(choose extra-nodes) :p1 (random-weight)])
-      ;(uber/add-edges [(choose extra-nodes) :p2 (random-weight)])
+      (uber/add-edges [:g1 (choose extra-nodes) (random-weight)])
+      (uber/add-edges [:g2 (choose extra-nodes) (random-weight)])
+      (uber/add-edges [(choose extra-nodes) :p1 (random-weight)])
+      (uber/add-edges [(choose extra-nodes) :p2 (random-weight)])
       )))
 
 (def empty-genotype
@@ -218,11 +191,12 @@
   ^{:type :acclivation}
   {:type :population
    :generation 0
+   :individuals nil
    :history []
    :epoch 1})
 
-(defn make-random-population [n]
-  (assoc empty-population
+(defn make-random-population [population n]
+  (assoc population
          :individuals (vec (take n (repeatedly make-random-genotype)))
          :population-size n))
 
@@ -236,6 +210,19 @@
 
 ;(def genotype->phenotype (memoize genotype->phenotype))
 
+(def ^:dynamic *genotype->phenotype* genotype->phenotype)
+
+(defn add-phenotype [g]
+  (if (contains? g :phenotype)
+      g
+      (assoc g :phenotype (*genotype->phenotype* g))))
+
+(defn add-fitness [g]
+  (let [g (add-phenotype g)]
+    (if (contains? g :fitness)
+        g
+        (assoc g :fitness (*w* (:phenotype g))))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn clamp [x]
@@ -248,7 +235,7 @@
 
 (defn turn-knob [g]
   (let [i (choose [0 1])
-        Δ (* 0.01 (util/sample-normal))]
+        Δ (* 0.02 (util/sample-normal))]
     (update-in g [:numbers i] #(clamp (+ % Δ)))))
 
 (defn n-node? [node]
@@ -301,8 +288,8 @@
       (add-edge g))))
 
 (def mutations
-  [[turn-knob 8]
-   [move-edge 4]
+  [[turn-knob 15]
+   [move-edge 1]
    [add-node 1]
    [remove-node 1]
    [add-edge 1]
@@ -341,7 +328,35 @@
             :numbers [n1 n2]
             :graph graph)]))
 
+(defn about-half-of [coll]
+  (keep #(when (< (rand) 0.7) %) coll))
+
+(defn mandatory-nodes [g]
+  (->> (uber/nodes g)
+       (filter #(#{\g \p} (-> % name str first)))))
+
 (defn crossover [g1 g2]
+  (let [graph1 (:graph g1), graph2 (:graph g2)
+        graph (-> (uber/digraph)
+                  (uber/add-nodes* (uber/nodes graph1))
+                  (uber/add-nodes* (uber/nodes graph2))
+                  (uber/add-edges* (uber/edges graph1))
+                  (uber/add-edges* (uber/edges graph2)))]
+    [(assoc empty-genotype
+            :numbers (:numbers (util/choose-one g1 g2))
+            :graph graph)]))
+
+(defn crossover [g1 g2]
+  (let [graph1 (:graph g1), graph2 (:graph g2)
+        graph (-> (uber/digraph)
+                  (uber/add-nodes* (mandatory-nodes graph1))
+                  (uber/add-edges* (about-half-of (uber/edges graph1)))
+                  (uber/add-edges* (about-half-of (uber/edges graph2))))]
+    [(assoc empty-genotype
+            :numbers (:numbers g1)
+            :graph graph)]))
+
+#_(defn crossover [g1 g2]
   [(assoc empty-genotype
           :numbers (:numbers g1)
           :graph (:graph g2))])
@@ -389,8 +404,7 @@
   (->> (genotype->phenotype g)
        (w)))
 
-(defn default-to [x default]
-  (if (some? x) x default))
+;;; dot ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn dot-edge [graph edge]
   (str (name (:src edge)) " -> " (name (:dest edge)) \space
@@ -414,6 +428,45 @@
                                     (zipmap [:g1 :g2] (:numbers g))
                                     :iterations 20)]
     (println (make-dot graph))))
+
+;;; print-method ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn graph-cstr [graph]
+  (str (sort (uber/nodes graph)) \space
+       (uber/count-edges graph) " edges"))
+
+(defn genotype-cstr [g]
+  (str (-> (strip-type g)
+           (select-keys [:numbers :phenotype :fitness])) \space
+       (graph-cstr (:graph g))))
+
+;  (let [graph (:graph g)
+;        g-numbers (:numbers g)
+;        ph-numbers (:phenotype g)]
+;    (str (:numbers g) \space
+;         (util/nilstr ph-numbers) \space
+;         (graph-cstr graph))))
+
+(defn population-cstr [p]
+  (str (strip-type (select-keys p [:generation :epoch])) \newline
+       (count (:individuals p))))
+
+(defn convenient-str ^String [x]
+  (if (map? x)
+      (case (:type x)
+        :genotype (genotype->edn x) ;(genotype-cstr x)
+        :population (population-cstr x)
+        (apply str (strip-type x)))
+      (apply str (strip-type x))))
+
+(defmethod print-method :acclivation [v ^java.io.Writer w]
+  (.write w (convenient-str v)))
+
+(defn genotype-str [g]
+  (->> (add-fitness g)
+       (genotype-cstr)))
+
+;;; printing ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn print-population [p]
   (let [p (update p :individuals #(map add-fitness %))
@@ -483,6 +536,8 @@
           ph (genotype->phenotype g')]
       [ph (w ph)])))
 
+(defn vfn [g] (comp second (virtual-fitness-fn g)))
+
 ;IDEA What's the average fitness?
 ;IDEA Look at where the fitness goes varying only one axis at a time.
 ;See the fitness function of x, holding y constant.
@@ -517,7 +572,7 @@
 
 (defn genotype-acclivity [genotype step dimension n-climbers]
   (let [vfn (virtual-fitness-fn genotype)]
-    (acclivity #(second (vfn %)) step dimension n-climbers)))
+    (acclivity (vfn genotype) step dimension n-climbers)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -527,10 +582,10 @@
 (defopts let-ga-opts
   {:keys [generations population-size n-mutants n-crosses f-mutate
                      f-cross tourney-size vary select fitness seed
-                     radius step dimension]
-   :or {generations 30, population-size 40, tourney-size 7,
+                     radius step dimension n-epochs]
+   :or {generations 40, population-size 40, tourney-size 20,
         f-mutate (partial mutate-n 2), f-cross crossover,
-        fitness genotype-fitness, seed 1, dimension 2,
+        fitness genotype-fitness, seed 1, dimension 2, n-epochs 1,
         radius nil, step 0.01}} ;arguments for fitness-as-seen-by
           ;make step 0.005 for precise fitness func (it just takes a long time)
   n-mutants (default-to n-mutants (int (* population-size 0.81)))
@@ -556,9 +611,11 @@
     (with-*out* (writer "phenotype-fitness")
       (print-fitness-fn (fn [ph] [ph (w ph)])))))
 
-(defn save-gen-data [{:keys [generation] :as population}]
+(defn save-gen-data [{:keys [epoch generation] :as population}]
   (let [data-file (io/file *data-directory*
-                          (str "best-genotype-gen" generation))
+                          (str "best-genotype"
+                               "-epoch" epoch
+                               "-gen" generation))
         best-genotype (best-of population)]
     (io/make-parents data-file)
     (with-*out* (writer data-file)
@@ -577,10 +634,20 @@
 ;     :best-genotype best-genotype
 ;     :best-fitnesses
 
+(def lastpop (atom nil))
+
+(defn printpop
+ ([] (printpop @lastpop))
+ ([p]
+  (run! println (:individuals p))
+  (run! println (:history p))))
+
 (defn accumulate-data [{:keys [generation] :as population}]
+  (update population :individuals #(map add-fitness %))
+  (reset! lastpop population)
   (update population :history conj (best-fitness-of population)))
   
-(defn run [& opts]
+#_(defn run [& opts]
   (let-ga-opts opts
     (binding [*data-directory* data-directory
               *w* (memoize w)
@@ -597,25 +664,46 @@
             -- (save-gen-data p)
             ;-- (print-population p)
             )
+          (update :individuals #(map add-fitness %))
           (bind best (best-of p))
 ;          -- (with-*out* (writer vfit-file)
 ;               (print-fitness-fn (virtual-fitness-fn best) :step step))
 ;          -- (with-*out* (writer vfit-file)
 ;               (fitness-as-seen-by best :radius radius :step step))
-          -- (run! println (:history p))
+          ;-- (run! println (:individuals p))
+          ;-- (run! println (:history p))
           (return best))))))
-;NOTNEXT Output the fitness function of the best individual at the end of
-; each generation. Also output the best individual.
 
-;THEN Run in a higher dimension.
+;TODO Run in a higher dimension.
 
-;It might be faster to run the hill-climbers in Clojure, where they have
-;direct access to the fitness function. Then we won't have to calculate
-;all the data points except for the few fitness functions that we want to
-;plot. If we output just the spreading-activation graph, we can read it
-;in again any time we want the function.
+(defn run-epoch [start-population epoch & opts]
+  (let-ga-opts opts
+    (binding [*w* (memoize (make-epoch-w))]
+      (with-state [p start-population]
+        ;TODO Store *w* in p?
+        (assoc :epoch epoch :generation 0)
+        (when (empty? (:individuals p))
+          (make-random-population population-size))
+        (accumulate-data)
+        -- (save-gen-data p)
+        (doseq [generation (range 1 (inc generations))]
+          (assoc :generation generation)
+          (next-gen)
+          (accumulate-data)
+          -- (save-gen-data p))))))
 
-;NEXT Hill-climber.
+(defn run [& opts]
+  (let-ga-opts opts
+    (binding [*data-directory* data-directory
+              *genotype->phenotype* (memoize genotype->phenotype)]
+      (with-rng-seed seed
+        (println (str "seed=" seed))
+        (with-state [p empty-population]
+          (assoc :seed util/*rng-seed*
+                 :fitness-func fitness)
+          (doseq [epoch (range 1 (inc n-epochs))]
+            (run-epoch epoch opts))
+          (return (best-of p)))))))
 
 (defn make-article-data
   "Makes all the fitness-func and population data files for the article."

@@ -12,7 +12,7 @@
             [clojure.math.numeric-tower :as math]
             [clojure.java.io :refer [file writer]]
             [clj-time.local :as ltime]
-            [farg.util :as util :refer [dd dde]]
+            [farg.util :as util :refer [dd dde with-rng-seed]]
             [farg.with-state :refer [with-state]]))
 
 (defn normalize [x]
@@ -72,6 +72,18 @@
          (update xx n #(normalize (direction % step))))
        (filter in-range?)))
 
+(defn +vector [xx yy]
+  (->> (map #(normalize (+ %1 %2)) xx yy)
+       vec))
+
+(defn all-steps
+  [step xx]
+  (->> (repeat (count xx) [(- step) 0.0 (+ step)])
+       (apply combo/cartesian-product)
+       (map #(+vector % xx))
+       (remove #(every? zero? %))
+       (filter in-range?)))
+
 (defn- update-best [f [bests best-fitness :as prev] xx]
   (cond
     :let [fitness (f xx)]
@@ -88,51 +100,54 @@
   between xx and another point, returns the other point (chosen arbitrarily
   but deterministically if more than one other point has the same fitness)."
   [f step xx]
-  (let [start-fitness (f xx)]
-    (letfn [(update-best [[bests best-fitness :as prev] xx]
-              (cond
-                :let [fitness (f xx)]
-                (< fitness start-fitness)
-                  prev
-                (empty? bests)
-                  [#{xx} fitness]
-                (< fitness best-fitness)
-                  prev
-                (= fitness best-fitness)
-                  [(conj bests xx) best-fitness]
-                [#{xx} fitness]))]
-      (let [[better-neighbors _] (reduce update-best
-                                         [nil nil]
-                                         (all-steps step xx))]
-        (if (empty? better-neighbors)
-          xx  ;local optimum
-          (first better-neighbors))))))
+  (with-rng-seed 1
+    (let [start-fitness (f xx)]
+      (letfn [(update-best [[bests best-fitness :as prev] xx]
+                (cond
+                  :let [fitness (f xx)]
+                  (< fitness start-fitness)
+                    prev
+                  (empty? bests)
+                    [#{xx} fitness]
+                  (< fitness best-fitness)
+                    prev
+                  (= fitness best-fitness)
+                    [(conj bests xx) best-fitness]
+                  [#{xx} fitness]))]
+        (let [[better-neighbors _] (reduce update-best
+                                           [nil nil]
+                                           (all-steps step xx))]
+          (if (empty? better-neighbors)
+            xx  ;local optimum
+            (util/choose-from better-neighbors)))))))
 
 (defn hill-climb
   "Hill-climbs 'f', one 'step' at a time, starting at 'xx'. Stops climbing
   when reaching a local optimum, or, on a neutral plateau, when either
   the same point has been reached 5 times or fitness has not improved for
-  1000 steps.  Returns [best-fitness n-steps start-xx best-xx]."
+  1000 steps.  Returns [best-fitness n-steps start-fitness start-xx best-xx]."
   [f step start-xx]
-  (loop [best-fitness (f start-xx)
-         n-steps 0
-         xx start-xx
-         seen-before {}
-         n-same-fitness 0]
-    (let [new-xx (hill-step f step xx)]
-      (cond
-        (= xx new-xx) ;hill-step didn't move: local optimum
-          [best-fitness n-steps start-xx xx]
-        :let [new-fitness (f new-xx)]
-        (not= new-fitness best-fitness)
-          (recur new-fitness (inc n-steps) new-xx {} 0)
-        (or (>= (get seen-before new-xx 0) 5)
-            (>= n-same-fitness 1000))
-          [best-fitness n-steps start-xx new-xx]
-        (recur best-fitness new-xx
-               (inc n-steps)
-               (update seen-before new-xx (fnil inc 0))
-               (inc n-same-fitness))))))
+  (let [start-fitness (f start-xx)]
+    (loop [best-fitness start-fitness
+           n-steps 0
+           xx start-xx
+           seen-before {}
+           n-same-fitness 0]
+      (let [new-xx (hill-step f step xx)]
+        (cond
+          (= xx new-xx) ;hill-step didn't move: local optimum
+            [best-fitness n-steps start-fitness start-xx xx]
+          :let [new-fitness (f new-xx)]
+          (not= new-fitness best-fitness)
+            (recur new-fitness (inc n-steps) new-xx {} 0)
+          (or (>= (get seen-before new-xx 0) 100)
+              (>= n-same-fitness 1000))
+            [best-fitness n-steps start-fitness start-xx new-xx]
+          (recur best-fitness
+                 (inc n-steps)
+                 new-xx
+                 (update seen-before new-xx (fnil inc 0))
+                 (inc n-same-fitness)))))))
 
 (defn run-climbers
   [f step dimension n-climbers]
