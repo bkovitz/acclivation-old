@@ -332,6 +332,18 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn penalize-zeros [w ph]
+  (if (some zero? ph)
+    -10.0
+    (w ph)))
+
+(defn genotype-fitness [g]
+  (let [w (get-w g)
+        _ (assert (some? w) "Need phenotype fitness function")
+        w #(penalize-zeros w %)]
+    (->> (genotype->phenotype g)
+         (w))))
+
 (defn mutate-n [n g]
   (take n (repeatedly #(mutate g))))
 
@@ -393,25 +405,33 @@
           :numbers (:numbers g1)
           :graph (:graph g2))])
 
+#_(defn tournament-selection
+  [f-fitness n p]
+  (apply max-key f-fitness
+         (util/choose-without-replacement n (:individuals p))))
+
+(defn tournament-selection [tourney-size fitness-func individuals]
+  (apply max-key fitness-func
+    (util/choose-without-replacement tourney-size individuals)))
+
 (defn random-pair [coll]
   (util/choose-without-replacement 2 coll))
 
-(defn mutate-and-crossover [mutate crossover n-by-mutation n-by-crossover p]
+(defn mutate-and-crossover
+  [tourney-size mutate crossover n-by-mutation n-by-crossover p]
   (let [parents (:individuals p)
-        mutants (->> (repeatedly #(choose parents))
+        biased-choice
+          #(tournament-selection tourney-size genotype-fitness parents)
+        mutants (->> (repeatedly biased-choice)
                      (mapcat #(mutate %))
                      (take n-by-mutation)
                      vec)
-        crosses (->> (repeatedly #(random-pair parents))
+        crosses (->> (repeatedly #(vector (biased-choice) (biased-choice)))
                      (mapcat #(apply crossover %))
                      (take n-by-crossover)
                      vec)]
     (assoc p :individuals (into mutants crosses))))
 
-(defn tournament-selection
-  [f-fitness n p]
-  (apply max-key f-fitness
-         (util/choose-without-replacement n (:individuals p))))
 ;  [f-fitness n p]
 ;  (let [indices (util/choose-without-replacement n
 ;                  (range (count (:individuals p))))
@@ -420,7 +440,7 @@
 ;    [(assoc p :individuals individuals)
 ;     (apply max-key :fitness contestants)]))
 
-(defn tournament-selection-on-population [f-fitness n p]
+#_(defn tournament-selection-on-population [f-fitness n p]
   (loop [winners #{}, n-tries 0]
     (if (or (>= (count winners) (:population-size p))
             (>= n-tries (* 2 (:population-size p))))
@@ -433,18 +453,6 @@
       vary
       select
       (update :generation inc)))
-
-(defn penalize-zeros [w ph]
-  (if (some zero? ph)
-    -10.0
-    (w ph)))
-
-(defn genotype-fitness [g]
-  (let [w (get-w g)
-        _ (assert (some? w) "Need phenotype fitness function")
-        w #(penalize-zeros w %)]
-    (->> (genotype->phenotype g)
-         (w))))
 
 ;;; dot ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -665,8 +673,9 @@
           ;make step 0.005 for precise fitness func (it just takes a long time)
   n-mutants (default-to n-mutants (int (* population-size 0.81)))
   n-crosses (default-to n-crosses (- population-size n-mutants))
-  vary (default-to vary (partial mutate-and-crossover f-mutate f-cross
-                                 n-mutants n-crosses))
+  vary (default-to vary
+         (partial mutate-and-crossover
+                  tourney-size f-mutate f-cross n-mutants n-crosses))
   ;select (partial tournament-selection-on-population fitness tourney-size)
   select identity
   next-gen (partial next-generation vary select)
