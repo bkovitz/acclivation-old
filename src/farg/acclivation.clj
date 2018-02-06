@@ -80,6 +80,7 @@
        (-> gt
            strip-type
            (update :graph graph->map)
+           (dissoc :w)
            prn-str)))
 
 (defn map->genotype [m]
@@ -265,11 +266,13 @@
     (w ph)))
 
 (defn genotype-fitness [g]
-  (let [w (get-w g)
-        _ (assert (some? w) "Need phenotype fitness function")
-        w #(penalize-zeros w %)]
-    (->> (genotype->phenotype g)
-         (w))))
+  (if-let [fitness (:fitness g)]
+    fitness
+    (let [w (get-w g)
+          _ (assert (some? w) "Need phenotype fitness function")
+          w #(penalize-zeros w %)]
+      (->> (*genotype->phenotype* g)
+           (w)))))
 
 (defn add-phenotype [g]
   (if (contains? g :phenotype)
@@ -388,7 +391,7 @@
             :graph graph)]))
 
 (defn about-half-of [coll]
-  (keep #(when (< (rand) 0.7) %) coll))
+  (keep #(when (< (rand) 0.8) %) coll))
 
 (defn mandatory-nodes [g]
   (->> (uber/nodes g)
@@ -431,6 +434,21 @@
 
 (defn random-pair [coll]
   (util/choose-without-replacement 2 coll))
+
+(defn mutate-and-crossover
+  [tourney-size mutate crossover n-by-mutation n-by-crossover p]
+  (let [parents (:individuals p)
+        biased-choice
+          #(tournament-selection tourney-size genotype-fitness parents)
+        mutants (->> (repeatedly biased-choice)
+                     (mapcat #(mutate %))
+                     (take n-by-mutation)
+                     vec)
+        crosses (->> (repeatedly #(vector (biased-choice) (biased-choice)))
+                     (mapcat #(apply crossover %))
+                     (take n-by-crossover)
+                     vec)]
+    (assoc p :individuals (into mutants crosses))))
 
 (defn mutate-and-crossover
   [tourney-size mutate crossover n-by-mutation n-by-crossover p]
@@ -661,7 +679,7 @@
   [gt]
   (fn [xx]
     (let [gt' (assoc gt :numbers xx)
-          ph (genotype->phenotype gt')
+          ph (*genotype->phenotype* gt')
           w (get-w gt')]
       (w ph))))
 
@@ -713,7 +731,7 @@
     (with-*out* (writer "phenotype-fitness")
       (print-fitness-fn (fn [ph] [ph (w ph)])))))
 
-(defn save-gen-data [{:keys [epoch generation] :as population}]
+#_(defn save-gen-data [{:keys [epoch generation] :as population}]
   (let [data-file (io/file *data-directory*
                           (str "best-genotype"
                                "-epoch" epoch
@@ -723,6 +741,14 @@
     (with-*out* (writer data-file)
       (prn best-genotype))
 ))
+
+(defn save-gen-data [{:keys [epoch generation individuals] :as population}]
+  (let [data-file (io/file *data-directory*
+                          (str "epoch" epoch
+                               "-gen" generation))]
+    (io/make-parents data-file)
+    (with-*out* (writer data-file)
+      (run! prn individuals))))
 
 ;  (let [population (update :individuals sort-by :fitness)
 ;  (with-*out* (writer (io/file *data-directory* "best-genotype"))
@@ -738,8 +764,9 @@
 
 (defn accumulate-data [{:keys [generation] :as population}]
   (with-state [population population]
-    (update :individuals #(map add-fitness %))
     add-w-to-everybody
+    (update :individuals #(map add-fitness %))
+    (assoc :individuals (sort-by :fitness > (:individuals population)))
     ;(update :individuals #(map add-w-source population %))
     (update :history conj (best-fitness-of population))
     -- (reset! lastpop population)
