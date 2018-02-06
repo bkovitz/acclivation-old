@@ -152,8 +152,9 @@
                  (inc n-same-fitness)))))))
 
 (defn run-climbers
-  [f step dimension n-climbers]
-  (let [f (memoize f)]
-    (->> (deterministic-random-xxs step dimension)
-         (take n-climbers)
-         (pmap #(hill-climb f step %)))))
+ ([f]
+  (run-climbers f 0.01 2 20))
+ ([f step dimension n-climbers]
+  (->> (deterministic-random-xxs step dimension)
+       (take n-climbers)
+       (map #(hill-climb f step %)))))
