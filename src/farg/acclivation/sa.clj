@@ -124,7 +124,7 @@
 
 (def ^{:doc "Activation"} A (attr :a))
 
-(def decay 0.1)
+(def decay 1.0)
 
 (defn apply-initial-activations
   [g initial-activations]

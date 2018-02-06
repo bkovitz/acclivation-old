@@ -225,8 +225,10 @@
 
 (defn add-w [population g]
   (assert (:w population))
-  (assoc g :w-source (:w-source population)
-           :w (:w population)))
+  (-> g
+    (assoc :w-source (:w-source population)
+             :w (:w population))
+    (dissoc :fitness)))
 
 (defn add-w-to-everybody [population]
   (update population :individuals (fn [individuals]
@@ -250,7 +252,7 @@
 
 (defn spread-activation [g]
   (-> (:graph g)
-      (sa/spread-activation (zipmap [:g1 :g2] (:numbers g)) :iterations 20)))
+      (sa/spread-activation (zipmap [:g1 :g2] (:numbers g)) :iterations 10)))
 
 (defn genotype->phenotype [g]
   (-> (spread-activation g)
@@ -297,7 +299,7 @@
 
 (defn turn-knob [g]
   (let [i (choose [0 1])
-        Δ (* 0.02 (util/sample-normal))]
+        Δ (* 0.01 (util/sample-normal))]
     (update-in g [:numbers i] #(clamp (+ % Δ)))))
 
 (defn n-node? [node]
@@ -355,7 +357,7 @@
       (add-edge g))))
 
 (def mutations
-  [[turn-knob 15]
+  [[turn-knob 25]
    [move-edge 1]
    [add-node 1]
    [remove-node 1]
@@ -573,8 +575,9 @@
 (defn best-of [p]
   (let [p (update p :individuals #(map add-fitness %))
         individuals (sort-by :fitness (:individuals p))]
-    (->> (last individuals)
-         (add-w p))))
+    (last individuals)))
+;    (->> (last individuals)
+;         (add-w p))))
 
 (defn best-fitness-of [p]
   (:fitness (best-of p)))
@@ -715,7 +718,7 @@
         fitness genotype-fitness, seed 1, dimension 2, n-epochs 1,
         radius nil, step 0.01}} ;arguments for fitness-as-seen-by
           ;make step 0.005 for precise fitness func (it just takes a long time)
-  n-mutants (default-to n-mutants (int (* population-size 0.61)))
+  n-mutants (default-to n-mutants (int (* population-size 0.71)))
   n-crosses (default-to n-crosses (- population-size n-mutants))
   vary (default-to vary
          (partial mutate-and-crossover
