@@ -412,6 +412,8 @@
   (let [graph1 (:graph g1), graph2 (:graph g2)
         graph (-> (uber/digraph)
                   (uber/add-nodes* (mandatory-nodes graph1))
+                  (uber/add-nodes* (uber/nodes graph1))
+                  (uber/add-nodes* (uber/nodes graph2))
                   (uber/add-edges* (about-half-of (uber/edges graph1)))
                   (uber/add-edges* (about-half-of (uber/edges graph2))))]
     [(assoc empty-genotype
@@ -442,12 +444,13 @@
           #(tournament-selection tourney-size genotype-fitness parents)
         mutants (->> (repeatedly biased-choice)
                      (mapcat #(mutate %))
+                     distinct
                      (take n-by-mutation)
                      vec)
         crosses (->> (repeatedly #(vector (biased-choice) (biased-choice)))
                      (mapcat #(apply crossover %))
-                     (take n-by-crossover)
-                     vec)]
+                     distinct
+                     (take n-by-crossover))]
     (assoc p :individuals (into mutants crosses))))
 
 (defn mutate-and-crossover
@@ -684,7 +687,8 @@
       (w ph))))
 
 (defn save-vfn [genotype filename]
-  (save-fn (vfn genotype) filename))
+  (binding [*genotype->phenotype* (memoize genotype->phenotype)]
+    (save-fn (vfn genotype) filename)))
 
 (defn genotype-acclivity
  ([genotype]
@@ -701,12 +705,12 @@
   {:keys [generations population-size n-mutants n-crosses f-mutate
                      f-cross tourney-size vary select fitness seed
                      radius step dimension n-epochs]
-   :or {generations 40, population-size 40, tourney-size 20,
+   :or {generations 20, population-size 40, tourney-size 5,
         f-mutate (partial mutate-n 1), f-cross crossover,
         fitness genotype-fitness, seed 1, dimension 2, n-epochs 1,
         radius nil, step 0.01}} ;arguments for fitness-as-seen-by
           ;make step 0.005 for precise fitness func (it just takes a long time)
-  n-mutants (default-to n-mutants (int (* population-size 0.81)))
+  n-mutants (default-to n-mutants (int (* population-size 0.61)))
   n-crosses (default-to n-crosses (- population-size n-mutants))
   vary (default-to vary
          (partial mutate-and-crossover
@@ -804,19 +808,20 @@
 (defn run-epoch [start-population epoch & opts]
   (let-ga-opts opts
     (let [[w w-source] (make-epoch-w)]
-      (binding [] ;[*w* (memoize w)]
-        (with-state [p start-population]
-          (assoc :epoch epoch, :generation 0,
-                 :w-source w-source, :w (memoize w))
-          (when (empty? (:individuals p))
-            (make-random-population population-size))
+      (with-state [p start-population]
+        (assoc :epoch epoch, :generation 0,
+               :w-source w-source, :w (memoize w))
+        (when (empty? (:individuals p))
+          (make-random-population population-size))
+        (accumulate-data)
+        -- (save-gen-data p)
+        (doseq [generation (range 1 (inc generations))]
+          (assoc :generation generation)
+          (next-gen)
           (accumulate-data)
           -- (save-gen-data p)
-          (doseq [generation (range 1 (inc generations))]
-            (assoc :generation generation)
-            (next-gen)
-            (accumulate-data)
-            -- (save-gen-data p)))))))
+          -- (println (best-fitness-of p))
+          )))))
 
 (defn run [& opts]
   (let-ga-opts opts
@@ -835,9 +840,12 @@
 (defn run-and-save [& opts]
   (let [opts (->> opts (map clojure.edn/read-string) (apply hash-map))
         winning-genotype (run opts)]
+    (spit "winner" winning-genotype)
     (spit "winner.dot" (dot winning-genotype))
     (with-*out* (io/writer "winner.acclivity")
-      (run! println (hill/run-climbers (vfn winning-genotype))))
+      (let [climber-results (hill/run-climbers (vfn winning-genotype))]
+        (run! println climber-results)
+        (println (util/average (map first climber-results)))))
     (save-vfn winning-genotype "winner.vfn")))
 
 (defn make-article-data
