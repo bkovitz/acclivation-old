@@ -28,7 +28,7 @@ acclivation.pdf: papers.bib
 	./mkplots
 
 run1:
-	lein run -m farg.acclivation/run-and-save :generations 20 :n-epochs 20 :seed 1
+	lein run -m farg.acclivation/run-and-save :generations 20 :n-epochs 100 :seed 100
 
 nohup:
 	nohup time nice make run1 &

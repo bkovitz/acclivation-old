@@ -252,7 +252,7 @@
 
 (defn spread-activation [g]
   (-> (:graph g)
-      (sa/spread-activation (zipmap [:g1 :g2] (:numbers g)) :iterations 10)))
+      (sa/spread-activation (zipmap [:g1 :g2] (:numbers g)) :iterations 5)))
 
 (defn genotype->phenotype [g]
   (-> (spread-activation g)
@@ -466,13 +466,16 @@
         biased-choice
           #(tournament-selection tourney-size genotype-fitness parents)
         mutants (->> (repeatedly biased-choice)
-                     (mapcat #(mutate %))
+                     (pmap mutate)
+                     (mapcat concat)
+                     distinct
                      (take n-by-mutation)
                      vec)
         crosses (->> (repeatedly #(vector (biased-choice) (biased-choice)))
-                     (mapcat #(apply crossover %))
-                     (take n-by-crossover)
-                     vec)]
+                     (pmap #(apply crossover %))
+                     (mapcat concat)
+                     distinct
+                     (take n-by-crossover))]
     (assoc p :individuals (into mutants crosses))))
 
 ;  [f-fitness n p]
@@ -823,6 +826,7 @@
         (when (empty? (:individuals p))
           (make-random-population population-size))
         (accumulate-data)
+        -- (println (best-fitness-of p))
         -- (save-gen-data p)
         (doseq [generation (range 1 (inc generations))]
           (assoc :generation generation)
