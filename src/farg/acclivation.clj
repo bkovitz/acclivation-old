@@ -335,7 +335,12 @@
                       (uber/add-edges % [from to (random-weight)]))))
 
 (defn remove-edge [g]
-  (update g :graph #(uber/remove-edges % (choose (uber/edges %)))))
+  (let [graph (:graph g)
+        edge (choose (uber/edges graph))]
+    (if edge
+      (assoc g :graph (uber/remove-edges graph edge))
+      g)))
+; (update g :graph #(uber/remove-edges % (choose (uber/edges %)))))
 
 (defn move-edge [g]
   (let [graph (:graph g)
