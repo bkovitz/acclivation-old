@@ -138,25 +138,35 @@
     (- 1.0 (util/distance [x1 x2] center))
     ))
 
-(defn w [ph]
+#_(defn w [ph]
   (+ (w12 ph) (w-many-small-hills ph) (w-distance ph)))
 
-(defn w [ph]
+#_(defn w [ph]
   (if (some #(< (Math/abs %) 0.02) ph)
     0.0
     (+ (w-many-small-hills ph)
        (* 9.0 (w12 ph) (w-distance ph)))))
 
-(defn w [ph]
+#_(defn w [ph]
   (+ (w-many-small-hills ph) (w-distance ph)))
 
 #_(defn w [ph]
   (* #_(w-equal ph) (Math/pow (w-distance ph) 2.0)))
 
+(def w-equal
+  (let [invv (make-inverted-v 0.0 0.2)]
+    (fn [[x1 x2]]
+      (invv (- x1 x2)))))
+
 (defn make-w [c]
   (fn [ph]
     (+ (w-many-small-hills ph)
        (- 1.0 (util/distance [c c] ph)))))
+
+(defn make-w [c]
+  (fn [[x1 x2 :as ph]]
+    (+ (w-many-small-hills ph)
+       (* 5.0 (w-equal ph) (- 1 (Math/abs (- x1 c)))))))
 
 (defn make-epoch-w
   "Returns [w w-source] where w is a randomly generated phenotype fitness
@@ -458,7 +468,7 @@
       vary
       add-w-to-everybody
       select
-      (update :generation inc)))
+      #_(update :generation inc)))
 
 ;;; dot ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -545,16 +555,11 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn make-fitness-data []
-  (doseq [x (range -1.01 1.01 0.005)
-          y (range -1.01 1.01 0.005)]
-    (println x y (w [x y]))))
-
 (defn trim-round-off-error [x]
   (/ (Math/round (* 100000000.0 x))
      100000000.0))
 
-(defn fitness-as-seen-by [g & {:keys [radius step]
+#_(defn fitness-as-seen-by [g & {:keys [radius step]
                                :or {radius nil, step 0.005}}]
   ;(let [[g1 g2] [-1.01 1.01]]  ;(:numbers g)]  ;or else [-1.01 1.01]
   (let [[g1 g2] (:numbers g)
@@ -571,7 +576,7 @@
             fitness (w ph)]
         (println x y fitness phx phy)))))
 
-(defn print-fitness-fn
+#_(defn print-fitness-fn
   "(f [startcoord]) should return [endcoord fitness]."
   [f & {:keys [step] :or {step 0.005}}]
   (let [xrange (range -1.0 1.000000000001 step)
@@ -598,13 +603,13 @@
          [x y])
        (pmap (fn [[x y]]
                [x y (f [x y])]))
-       (run! println)))
+       (run! #(apply println %))))
 
 (defn save-fn [f filename]
   (with-*out* (io/writer filename)
     (print-fn f)))
 
-(defn virtual-fitness-fn
+#_(defn virtual-fitness-fn
   "Returns the fitness function f seen by the \"numbers\" part of genotype g.
   (f [startcoord]) returns [endcoord fitness], where endcoord is the phenotype
   resulting from startcoord."
@@ -629,7 +634,7 @@
     (doseq [x (range 0.0 10.0 0.05)]
       (println x (invv x)))))
 
-(defn print-w
+#_(defn print-w
   "Prints the fitness function so we can compare it to the virtual fitness
   functions in the genotypes."
   [& {:keys [step] :or {step 0.005}}]
@@ -679,7 +684,7 @@
                      f-cross tourney-size vary select fitness seed
                      radius step dimension n-epochs]
    :or {generations 40, population-size 40, tourney-size 20,
-        f-mutate (partial mutate-n 2), f-cross crossover,
+        f-mutate (partial mutate-n 1), f-cross crossover,
         fitness genotype-fitness, seed 1, dimension 2, n-epochs 1,
         radius nil, step 0.01}} ;arguments for fitness-as-seen-by
           ;make step 0.005 for precise fitness func (it just takes a long time)
@@ -703,7 +708,7 @@
 ;    ;fitness-as-seen-by best of last gen
   )
 
-(defn print-phenotype-fitness-fn [& opts]
+#_(defn print-phenotype-fitness-fn [& opts]
   (let-ga-opts opts
     (with-*out* (writer "phenotype-fitness")
       (print-fitness-fn (fn [ph] [ph (w ph)])))))
