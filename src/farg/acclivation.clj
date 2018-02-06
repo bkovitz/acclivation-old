@@ -808,6 +808,7 @@
 (defn run-epoch [start-population epoch & opts]
   (let-ga-opts opts
     (let [[w w-source] (make-epoch-w)]
+      (println w-source)
       (with-state [p start-population]
         (assoc :epoch epoch, :generation 0,
                :w-source w-source, :w (memoize w))
@@ -833,7 +834,7 @@
           (assoc :seed util/*rng-seed*)
           (doseq [epoch (range 1 (inc n-epochs))]
             (when (> n-epochs 1)
-              -- (println "epoch" epoch))
+              -- (print (str "epoch" epoch \space)))
             (run-epoch epoch opts))
           (return (best-of p)))))))
 
