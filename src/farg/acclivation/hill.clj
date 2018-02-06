@@ -13,7 +13,8 @@
             [clojure.java.io :refer [file writer]]
             [clj-time.local :as ltime]
             [farg.util :as util :refer [dd dde with-rng-seed]]
-            [farg.with-state :refer [with-state]]))
+            [farg.with-state :refer [with-state]]
+            [potemkin :refer [fast-memoize] :rename {fast-memoize memoize}]))
 
 (defn normalize [x]
   (if (zero? x)
@@ -152,6 +153,7 @@
 
 (defn run-climbers
   [f step dimension n-climbers]
-  (->> (deterministic-random-xxs step dimension)
-       (take n-climbers)
-       (map #(hill-climb f step %))))
+  (let [f (memoize f)]
+    (->> (deterministic-random-xxs step dimension)
+         (take n-climbers)
+         (pmap #(hill-climb f step %)))))

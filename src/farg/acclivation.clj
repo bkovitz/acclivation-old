@@ -1,12 +1,14 @@
 (ns farg.acclivation
   (:refer-clojure :exclude [rand rand-int cond memoize])
   (:require [better-cond.core :refer [cond]]
+            [clojure.core.reducers :as r]
             [clojure.tools.trace :refer [deftrace] :as trace]
             [clojure.pprint :refer [pprint]]
             [clojure.math.combinatorics :as combo]
             [clojure.math.numeric-tower :as math]
             [clojure.java.io :as io :refer [file writer]]
             [clj-time.local :as ltime]
+            [com.rpl.specter :as S]
             [farg.util :refer [dd dde rand choose choose-one with-rng-seed
                                mround defopts with-*out*]
              :as util]
@@ -165,7 +167,7 @@
         w (eval w-source)]
     [w w-source]))
 
-(def ^:dynamic *w* w)  ;phenotype fitness
+;(def ^:dynamic *w* w)  ;phenotype fitness
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -210,21 +212,24 @@
    :history []
    :epoch 1})
 
-(defn add-w-source [population g]
-  (assoc g :w-source (:w-source population)))
+(defn add-w [population g]
+  (assert (:w population))
+  (assoc g :w-source (:w-source population)
+           :w (:w population)))
 
-(defn add-w-source-to-everybody [population]
+(defn add-w-to-everybody [population]
   (update population :individuals (fn [individuals]
-                                    (map #(add-w-source population %)
+                                    (map #(add-w population %)
                                          individuals))))
 
-(defn get-w [{:keys [w-source]}]
-  (eval w-source))
+(defn get-w [{:keys [w w-source]}]
+  (assert (some? w-source))
+  (if (some? w) w (memoize (eval w-source))))
 
 (defn make-random-population [population n]
   (assoc population
          :individuals (->> (repeatedly make-random-genotype)
-                           (map #(add-w-source population %))
+                           (map #(add-w population %))
                            (take n)
                            vec)
          :population-size n))
@@ -244,6 +249,18 @@
 
 (def ^:dynamic *genotype->phenotype* genotype->phenotype)
 
+(defn penalize-zeros [w ph]
+  (if (some zero? ph)
+    -10.0
+    (w ph)))
+
+(defn genotype-fitness [g]
+  (let [w (get-w g)
+        _ (assert (some? w) "Need phenotype fitness function")
+        w #(penalize-zeros w %)]
+    (->> (genotype->phenotype g)
+         (w))))
+
 (defn add-phenotype [g]
   (if (contains? g :phenotype)
       g
@@ -253,7 +270,7 @@
   (let [g (add-phenotype g)]
     (if (contains? g :fitness)
         g
-        (assoc g :fitness (*w* (:phenotype g))))))
+        (assoc g :fitness (genotype-fitness g)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -331,18 +348,6 @@
   ((util/weighted-choice mutations) g))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defn penalize-zeros [w ph]
-  (if (some zero? ph)
-    -10.0
-    (w ph)))
-
-(defn genotype-fitness [g]
-  (let [w (get-w g)
-        _ (assert (some? w) "Need phenotype fitness function")
-        w #(penalize-zeros w %)]
-    (->> (genotype->phenotype g)
-         (w))))
 
 (defn mutate-n [n g]
   (take n (repeatedly #(mutate g))))
@@ -451,6 +456,7 @@
 (defn next-generation [vary select population]
   (-> population
       vary
+      add-w-to-everybody
       select
       (update :generation inc)))
 
@@ -532,7 +538,7 @@
   (let [p (update p :individuals #(map add-fitness %))
         individuals (sort-by :fitness (:individuals p))]
     (->> (last individuals)
-         (add-w-source p))))
+         (add-w p))))
 
 (defn best-fitness-of [p]
   (:fitness (best-of p)))
@@ -588,8 +594,11 @@
        vec))
 
 (defn print-fn [f]
-  (doseq [x normalized-range, y normalized-range]
-    (println x y (f [x y]))))
+  (->> (for [x normalized-range, y normalized-range]
+         [x y])
+       (pmap (fn [[x y]]
+               [x y (f [x y])]))
+       (run! println)))
 
 (defn save-fn [f filename]
   (with-*out* (io/writer filename)
@@ -605,7 +614,7 @@
           ph (genotype->phenotype g')]
       [ph (w ph)])))
 
-(defn vfn [g] (comp second (virtual-fitness-fn g)))
+;(defn vfn [g] (comp second (virtual-fitness-fn g)))
 
 ;IDEA What's the average fitness?
 ;IDEA Look at where the fitness goes varying only one axis at a time.
@@ -725,7 +734,7 @@
 (defn accumulate-data [{:keys [generation] :as population}]
   (with-state [population population]
     (update :individuals #(map add-fitness %))
-    add-w-source-to-everybody
+    add-w-to-everybody
     ;(update :individuals #(map add-w-source population %))
     (update :history conj (best-fitness-of population))
     -- (reset! lastpop population)
@@ -763,9 +772,10 @@
 (defn run-epoch [start-population epoch & opts]
   (let-ga-opts opts
     (let [[w w-source] (make-epoch-w)]
-      (binding [*w* (memoize w)]
+      (binding [] ;[*w* (memoize w)]
         (with-state [p start-population]
-          (assoc :epoch epoch, :generation 0, :w-source w-source)
+          (assoc :epoch epoch, :generation 0,
+                 :w-source w-source, :w (memoize w))
           (when (empty? (:individuals p))
             (make-random-population population-size))
           (accumulate-data)
@@ -783,9 +793,10 @@
       (with-rng-seed seed
         (println (str "seed=" seed))
         (with-state [p empty-population]
-          (assoc :seed util/*rng-seed*
-                 :fitness-func fitness)
+          (assoc :seed util/*rng-seed*)
           (doseq [epoch (range 1 (inc n-epochs))]
+            (when (> n-epochs 1)
+              -- (println "epoch" epoch))
             (run-epoch epoch opts))
           (return (best-of p)))))))
 
