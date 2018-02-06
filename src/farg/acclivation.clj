@@ -801,7 +801,8 @@
           (return (best-of p)))))))
 
 (defn run-and-save [& opts]
-  (let [winning-genotype (run opts)]
+  (let [opts (->> opts (map clojure.edn/read-string) (apply hash-map))
+        winning-genotype (run opts)]
     (spit "winner.dot" (dot winning-genotype))
     (with-*out* (io/writer "winner.acclivity")
       (run! println (hill/run-climbers (vfn winning-genotype))))
