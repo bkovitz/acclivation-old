@@ -90,9 +90,15 @@
 
 (def edn-readers {'farg.acclivation/genotype map->genotype})
 
+(defn edn-read [pushback-reader]
+  (clojure.edn/read {:readers edn-readers, :eof :eof} pushback-reader))
+
 (defn edn-slurp [file]
-  (clojure.edn/read {:readers edn-readers}
-    (java.io.PushbackReader. (io/reader file))))
+  (let [pbr (java.io.PushbackReader. (io/reader file))]
+    (->> (repeatedly #(edn-read pbr))
+      (take-while #(not= :eof %)))))
+;  (clojure.edn/read {:readers edn-readers, :eof :eof}
+;    (java.io.PushbackReader. (io/reader file))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -707,6 +713,27 @@
  ([genotype step dimension n-climbers]
   (acclivity (vfn genotype) step dimension n-climbers)))
 
+(defn fn-acclivity
+  "Returns only average height reached by hill-climbers. Silent."
+ ([f]
+  (fn-acclivity f 0.01 2 20))
+ ([f step dimension n-climbers]
+  (->> (hill/run-climbers f step dimension n-climbers)
+    (map first)
+    util/average)))
+
+(defn wfn-acclivity
+ ([gt]
+  (wfn-acclivity gt 0.01 2 20))
+ ([gt step dimension n-climbers]
+  (fn-acclivity (get-w gt) step dimension n-climbers)))
+
+(defn vfn-acclivity
+ ([gt]
+  (vfn-acclivity gt 0.01 2 20))
+ ([gt step dimension n-climbers]
+  (fn-acclivity (vfn gt) step dimension n-climbers)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn now-suffix []
@@ -813,6 +840,70 @@
           ;-- (run! println (:individuals p))
           ;-- (run! println (:history p))
           (return best))))))
+
+(defn mkfile [file]
+  (if (= java.io.File (type file))
+    file
+    (io/file file)))
+
+(defn readpop [filename]
+  (-> filename edn-slurp vec))
+
+(defn readbest
+  "The best genotype is assumed to be the first genotype in the file."
+  [filename]
+  (-> filename edn-slurp first))
+
+;(defn best-of-each-epoch [dir]
+;  (let [dir (io/file dir)]
+    
+(defn parse-filename [file]
+  (let [file (mkfile file)
+        parsed (re-matches #".*epoch(\d+)-gen(\d+)" (.getName file))]
+    (when parsed
+      (let [[_ epoch gen] parsed]
+        {:type ::fileinfo
+         :file file,
+         :epoch (Integer/parseInt epoch),
+         :gen (Integer/parseInt gen)}))))
+
+(defn saved-files [dir]
+  (let [dir (mkfile dir)]
+    (->> (.listFiles dir)
+      (keep parse-filename))))
+
+(defn epochs [dir]
+  (->> dir saved-files (map :epoch) distinct sort))
+
+(defn zeroth-gen-of-epoch [epoch file-infos]
+  (->> file-infos
+    (some #(and (= epoch (:epoch %))
+                (zero? (:gen %))))))
+
+(defn last-gen-of-epoch [epoch file-infos]
+  (->> file-infos
+    (filter #(= epoch (:epoch %)))
+    (apply max-key :gen)))
+
+(defn best-of-gen [file-info]
+  (-> file-info :file readbest))
+
+(defn acclivities-epoch-by-epoch [dir]
+  (let [file-infos (saved-files dir)]
+    (doseq [epoch (epochs dir)]
+      (let [best-gt (->> file-infos (last-gen-of-epoch epoch) best-of-gen)]
+        (println epoch (wfn-acclivity best-gt) (vfn-acclivity best-gt))))))
+
+(defn acclivities-gen-by-gen [dir epoch]
+  (doseq [gen (->> dir
+                   saved-files
+                   (filter #(= epoch (:epoch %)))
+                   (sort-by :gen))]
+    (println (:gen gen)
+             (wfn-acclivity (best-of-gen gen))
+             (vfn-acclivity (best-of-gen gen)))))
+
+;(println (->> "seed1-d2" saved-files (last-gen-of-epoch 5) best-of-gen))
 
 ;TODO Run in a higher dimension.
 
