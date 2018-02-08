@@ -123,6 +123,8 @@
             xx  ;local optimum
             (util/choose-from better-neighbors)))))))
 
+;NEXT: Limit hill-climbing to a radius around a point.
+
 (defn hill-climb
   "Hill-climbs 'f', one 'step' at a time, starting at 'xx'. Stops climbing
   when reaching a local optimum, or, on a neutral plateau, when either
