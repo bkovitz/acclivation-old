@@ -268,6 +268,26 @@
 
 (def ^:dynamic *genotype->phenotype* genotype->phenotype)
 
+(defn gfn
+  "Genotype gt's genotype->phenotype function, as a function of :numbers."
+  [gt]
+  (fn [xx]
+    (let [gt' (assoc gt :numbers xx)]
+      (*genotype->phenotype* gt'))))
+
+(defn vfn
+  "Return's genotype gt's virtual fitness function."
+  [gt]
+  (let [xx->ph (gfn gt)
+        w (get-w gt)]
+    (fn [xx]
+      (-> xx xx->ph w))))
+;  (fn [xx]
+;    (let [gt' (assoc gt :numbers xx)
+;          ph (*genotype->phenotype* gt')
+;          w (get-w gt')]
+;      (w ph))))
+
 (defn penalize-zeros [w ph]
   (if (some zero? ph)
     -10.0
@@ -647,6 +667,24 @@
   (with-*out* (io/writer filename)
     (print-fn f)))
 
+(defn print-range
+ ([gt]
+  (print-range (memoize (gfn gt)) (get-w gt)))
+ ([gfn wfn]
+  (->> (for [x normalized-range, y normalized-range]
+         [x y])
+       (pmap (fn [[x y]]
+               (let [[phx phy] (gfn [x y])]
+                 [phx phy (wfn [phx phy]) x y])))
+       (run! #(apply println %)))))
+
+(defn save-range
+ ([gt filename]
+  (save-range (memoize (gfn gt)) (get-w gt) filename))
+ ([gfn wfn filename]
+  (with-*out* (io/writer filename)
+    (print-range gfn wfn))))
+
 #_(defn virtual-fitness-fn
   "Returns the fitness function f seen by the \"numbers\" part of genotype g.
   (f [startcoord]) returns [endcoord fitness], where endcoord is the phenotype
@@ -693,15 +731,6 @@
   (let [all-results (hill/run-climbers f step dimension n-climbers)]
     (run! println all-results)
     (util/average (map first all-results)))))
-
-(defn vfn
-  "Return's genotype gt's virtual fitness function."
-  [gt]
-  (fn [xx]
-    (let [gt' (assoc gt :numbers xx)
-          ph (*genotype->phenotype* gt')
-          w (get-w gt')]
-      (w ph))))
 
 (defn save-vfn [genotype filename]
   (binding [*genotype->phenotype* (memoize genotype->phenotype)]
@@ -923,19 +952,31 @@
 (defn best-of-gen [file-info]
   (-> file-info :file readbest))
 
+(defn pr-epoch-data [dir epoch]
+  (let [best-gt (->> dir saved-files (last-gen-of-epoch epoch) best-of-gen)]
+    (apply println epoch (mround-floats (genotype-data best-gt)))))
+    ;TODO epoch should be in the gt
+
 (defn data-epoch-by-epoch [dir]
-  (let [file-infos (saved-files dir)]
-    (doseq [epoch (epochs dir)]
-      (let [best-gt (->> file-infos (last-gen-of-epoch epoch) best-of-gen)]
-        (apply println epoch (mround-floats (genotype-data best-gt)))))))
+  (doseq [epoch (epochs dir)]
+    (pr-epoch-data dir epoch)))
+
+(defn pr-gen-data [dir epoch gen]
+  (apply println gen (-> (read-gt dir epoch gen) genotype-data mround-floats)))
 
 (defn data-gen-by-gen [dir epoch]
-  (doseq [gen (->> dir
-                   saved-files
-                   (filter #(= epoch (:epoch %)))
-                   (sort-by :gen))]
-    (let [best-gt (best-of-gen gen)]
+  (doseq [gen (->> dir saved-files (just-epoch epoch) (sort-by :gen))]
+    (let [best-gt (best-of gen)]
       (println (:gen gen) (mround-floats (genotype-data best-gt))))))
+      ;TODO gen should be in the gt
+
+;(defn data-gen-by-gen [dir epoch]
+;  (doseq [gen (->> dir
+;                   saved-files
+;                   (filter #(= epoch (:epoch %)))
+;                   (sort-by :gen))]
+;    (let [best-gt (best-of-gen gen)]
+;      (println (:gen gen) (mround-floats (genotype-data best-gt))))))
 
 ;(println (->> "seed1-d2" saved-files (last-gen-of-epoch 5) best-of-gen))
 
