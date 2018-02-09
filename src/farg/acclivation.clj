@@ -135,8 +135,8 @@
     (vec (repeatedly 20 #(vector (rand -1.0 +1.0) (rand -1.0 +1.0))))))
 
 (defn w-many-small-hills [[x1 x2]]
-  (* (Math/cos (* 30 x1))
-     (Math/sin (* 30 x2))))
+  (* (Math/cos (* 20 x1))
+     (Math/sin (* 20 x2))))
 
 (defn w-distance [[x1 x2]]
   (let [center [-0.43 0.67]
@@ -234,6 +234,7 @@
   (assert (:w population))
   (-> g
     (merge (select-keys population [:w-source :w :epoch :generation]))
+    (dissoc :phenotype)
     (dissoc :fitness)))
 
 (defn add-basic-data-to-everybody [population]
@@ -383,7 +384,7 @@
       (add-edge g))))
 
 (def mutations
-  [[turn-knob 25]
+  [[turn-knob 15]
    [move-edge 1]
    [add-node 1]
    [remove-node 1]
@@ -728,7 +729,7 @@
 
 (defn acclivity
  ([f]
-  (acclivity f 0.01 2 20))
+  (acclivity f 0.01 2 10))
  ([f step dimension n-climbers]
   (let [all-results (hill/run-climbers f step dimension n-climbers)]
     (run! println all-results)
@@ -740,14 +741,14 @@
 
 (defn genotype-acclivity
  ([genotype]
-  (genotype-acclivity genotype 0.01 2 20))
+  (genotype-acclivity genotype 0.01 2 10))
  ([genotype step dimension n-climbers]
   (acclivity (vfn genotype) step dimension n-climbers)))
 
 (defn fn-acclivity
   "Returns only average height reached by hill-climbers. Silent."
  ([f]
-  (fn-acclivity f 0.01 2 20))
+  (fn-acclivity f 0.01 2 10))
  ([f step dimension n-climbers]
   (->> (hill/run-climbers f step dimension n-climbers)
     (map first)
@@ -755,13 +756,13 @@
 
 (defn wfn-acclivity
  ([gt]
-  (wfn-acclivity gt 0.01 2 20))
+  (wfn-acclivity gt 0.01 2 10))
  ([gt step dimension n-climbers]
   (fn-acclivity (get-w gt) step dimension n-climbers)))
 
 (defn vfn-acclivity
  ([gt]
-  (vfn-acclivity gt 0.01 2 20))
+  (vfn-acclivity gt 0.01 2 10))
  ([gt step dimension n-climbers]
   (fn-acclivity (vfn gt) step dimension n-climbers)))
 
@@ -957,7 +958,7 @@
 
 (defn pr-epoch-data [dir epoch]
   (let [best-gt (->> dir saved-files (last-gen-of-epoch epoch) best-of-gen)]
-    (apply println epoch (mround-floats (genotype-data best-gt)))))
+    (apply println (mround-floats (genotype-data best-gt)))))
     ;TODO epoch should be in the gt
 
 (defn data-epoch-by-epoch [dir]
@@ -997,14 +998,14 @@
         (accumulate-data)
         -- (save-gen-data p)
         ;-- (println (best-fitness-of p))
-        -- (apply println (-> p best-of genotype-data mround-floats))
+        ;-- (apply println (-> p best-of genotype-data mround-floats))
         (doseq [generation (range 1 (inc generations))]
           (assoc :generation generation)
           (next-gen)
           (accumulate-data)
           -- (save-gen-data p)
           ;-- (println (best-fitness-of p))
-          -- (apply println (-> p best-of genotype-data mround-floats))
+          ;-- (apply println (-> p best-of genotype-data mround-floats))
           )))))
 
 (defn run [& opts]
@@ -1018,7 +1019,9 @@
           (doseq [epoch (range 1 (inc n-epochs))]
             (when (> n-epochs 1)
               -- (print (str "epoch" epoch \space)))
-            (run-epoch epoch opts))
+            (run-epoch epoch opts)
+            ;-- (apply println (-> p best-of genotype-data mround-floats)))
+            )
           (return (best-of p)))))))
 
 (defn run-and-save [& opts]
