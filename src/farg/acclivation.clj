@@ -229,16 +229,16 @@
    :history []
    :epoch 1})
 
-(defn add-w [population g]
+;TODO rename to add-basic-data
+(defn add-basic-data [population g]
   (assert (:w population))
   (-> g
-    (assoc :w-source (:w-source population)
-             :w (:w population))
+    (merge (select-keys population [:w-source :w :epoch :generation]))
     (dissoc :fitness)))
 
-(defn add-w-to-everybody [population]
+(defn add-basic-data-to-everybody [population]
   (update population :individuals (fn [individuals]
-                                    (map #(add-w population %)
+                                    (map #(add-basic-data population %)
                                          individuals))))
 
 (defn get-w [{:keys [w w-source]}]
@@ -248,7 +248,7 @@
 (defn make-random-population [population n]
   (assoc population
          :individuals (->> (repeatedly make-random-genotype)
-                           (map #(add-w population %))
+                           (map #(add-basic-data population %))
                            (take n)
                            vec)
          :population-size n))
@@ -503,7 +503,7 @@
 (defn next-generation [vary select population]
   (-> population
       vary
-      add-w-to-everybody
+      add-basic-data-to-everybody
       select
       #_(update :generation inc)))
 
@@ -586,7 +586,7 @@
         individuals (sort-by :fitness (:individuals p))]
     (last individuals)))
 ;    (->> (last individuals)
-;         (add-w p))))
+;         (add-basic-data p))))
 
 (defn best-fitness-of [p]
   (:fitness (best-of p)))
@@ -806,7 +806,7 @@
 
 (defn accumulate-data [{:keys [generation] :as population}]
   (with-state [population population]
-    add-w-to-everybody
+    add-basic-data-to-everybody
     (update :individuals #(map add-fitness %))
     (assoc :individuals (sort-by :fitness > (:individuals population)))
     ;(update :individuals #(map add-w-source population %))
@@ -840,6 +840,19 @@
           ;-- (run! println (:individuals p))
           ;-- (run! println (:history p))
           (return best))))))
+
+(defn w-args [{:keys [w-source] :as gt}]
+  (drop 1 w-source))
+
+(defn n-edges [{:keys [graph] :as gt}]
+  (-> graph uber/edges count))
+
+(defn genotype-data [gt]
+  [(wfn-acclivity gt) (vfn-acclivity gt) (w-args gt)
+   (:numbers gt) (n-edges gt) (:phenotype gt) (:fitness gt)])
+
+(defn mround-floats [data]
+  (S/transform [(S/walker float?)] util/mround data))
 
 (defn mkfile [file]
   (if (= java.io.File (type file))
@@ -875,33 +888,54 @@
 (defn epochs [dir]
   (->> dir saved-files (map :epoch) distinct sort))
 
+(defn just-epoch [epoch file-infos]
+  (->> file-infos
+    (filter #(= epoch (:epoch %)))))
+
+(defn just-gen [gen file-infos]
+  (->> file-infos
+    (filter #(= gen (:gen %)))
+    first))
+
+(defn just-nth [n file-info]
+  (-> file-info :file edn-slurp (nth n)))
+
 (defn zeroth-gen-of-epoch [epoch file-infos]
   (->> file-infos
-    (some #(and (= epoch (:epoch %))
+    (some #(and (= epoch (:epoch %))  ;TODO Call just-epoch and just-gen
                 (zero? (:gen %))))))
 
 (defn last-gen-of-epoch [epoch file-infos]
   (->> file-infos
-    (filter #(= epoch (:epoch %)))
+    (filter #(= epoch (:epoch %)))  ;TODO Call just-epoch
     (apply max-key :gen)))
+
+(defn read-gt
+ ([dir epoch gen]
+  (read-gt dir epoch gen 0))  ;index 0 is the best genotype
+ ([dir epoch gen index]
+  (->> dir
+    saved-files
+    (just-epoch epoch)
+    (just-gen gen)
+    (just-nth index))))
 
 (defn best-of-gen [file-info]
   (-> file-info :file readbest))
 
-(defn acclivities-epoch-by-epoch [dir]
+(defn data-epoch-by-epoch [dir]
   (let [file-infos (saved-files dir)]
     (doseq [epoch (epochs dir)]
       (let [best-gt (->> file-infos (last-gen-of-epoch epoch) best-of-gen)]
-        (println epoch (wfn-acclivity best-gt) (vfn-acclivity best-gt))))))
+        (apply println epoch (mround-floats (genotype-data best-gt)))))))
 
-(defn acclivities-gen-by-gen [dir epoch]
+(defn data-gen-by-gen [dir epoch]
   (doseq [gen (->> dir
                    saved-files
                    (filter #(= epoch (:epoch %)))
                    (sort-by :gen))]
-    (println (:gen gen)
-             (wfn-acclivity (best-of-gen gen))
-             (vfn-acclivity (best-of-gen gen)))))
+    (let [best-gt (best-of-gen gen)]
+      (println (:gen gen) (mround-floats (genotype-data best-gt))))))
 
 ;(println (->> "seed1-d2" saved-files (last-gen-of-epoch 5) best-of-gen))
 
