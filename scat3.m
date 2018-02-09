@@ -7,5 +7,6 @@ D = importdata(filename);
 X = D(:,1);
 Y = D(:,2);
 Z = D(:,3);
-scatter3(X,Y,Z,1,Z);
+%scatter3(X,Y,Z,1,Z);
+scatter3(X,Y,Z,10);
 axis vis3d

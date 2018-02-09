@@ -149,6 +149,8 @@
                 g))
             g0
             (range iterations))))
+
+;IDEA Try allowing activation to feed into edge weights.
           
 ;  (let [g (transform [NODES VAL A] (fn [[_ node] _] (get initial-activations node 0.0)) g)]
 ;  #_(->> g ;(apply-initial-activations g initial-activations)

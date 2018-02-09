@@ -1,4 +1,4 @@
-function result = seefit(filename, step)
+function result = mesh3(filename, step)
 % See a 3D mesh plot of a fitness function
 
 D = importdata(filename);

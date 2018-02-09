@@ -426,6 +426,8 @@
 (defn about-half-of [coll]
   (keep #(when (< (rand) 0.8) %) coll))
 
+;(def about-half-of take-first-half)
+
 (defn mandatory-nodes [g]
   (->> (uber/nodes g)
        (filter #(#{\g \p} (-> % name str first)))))
@@ -470,7 +472,7 @@
 (defn random-pair [coll]
   (util/choose-without-replacement 2 coll))
 
-(defn mutate-and-crossover
+#_(defn mutate-and-crossover
   [tourney-size mutate crossover n-by-mutation n-by-crossover p]
   (let [parents (:individuals p)
         biased-choice
@@ -492,13 +494,13 @@
         biased-choice
           #(tournament-selection tourney-size genotype-fitness parents)
         mutants (->> (repeatedly biased-choice)
-                     (pmap mutate)
+                     (map mutate)
                      (mapcat concat)
                      distinct
                      (take n-by-mutation)
                      vec)
         crosses (->> (repeatedly #(vector (biased-choice) (biased-choice)))
-                     (pmap #(apply crossover %))
+                     (map #(apply crossover %))
                      (mapcat concat)
                      distinct
                      (take n-by-crossover))]
@@ -877,7 +879,8 @@
   (-> graph uber/edges count))
 
 (defn genotype-data [gt]
-  [(wfn-acclivity gt) (vfn-acclivity gt) (w-args gt)
+  [(:epoch gt) (:generation gt)
+   (wfn-acclivity gt) (vfn-acclivity gt) (w-args gt)
    (:numbers gt) (n-edges gt) (:phenotype gt) (:fitness gt)])
 
 (defn mround-floats [data]
@@ -992,14 +995,16 @@
         (when (empty? (:individuals p))
           (make-random-population population-size))
         (accumulate-data)
-        -- (println (best-fitness-of p))
         -- (save-gen-data p)
+        ;-- (println (best-fitness-of p))
+        -- (apply println (-> p best-of genotype-data mround-floats))
         (doseq [generation (range 1 (inc generations))]
           (assoc :generation generation)
           (next-gen)
           (accumulate-data)
           -- (save-gen-data p)
-          -- (println (best-fitness-of p))
+          ;-- (println (best-fitness-of p))
+          -- (apply println (-> p best-of genotype-data mround-floats))
           )))))
 
 (defn run [& opts]
