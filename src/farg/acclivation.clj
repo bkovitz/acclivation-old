@@ -139,8 +139,8 @@
     (vec (repeatedly 20 #(vector (rand -1.0 +1.0) (rand -1.0 +1.0))))))
 
 (defn w-many-small-hills [[x1 x2]]
-  (* (Math/cos (* 30 x1))
-     (Math/sin (* 30 x2))))
+  (* (Math/cos (* 20 x1))
+     (Math/sin (* 20 x2))))
 
 (defn w-distance [[x1 x2]]
   (let [center [-0.43 0.67]
@@ -165,7 +165,7 @@
   (* #_(w-equal ph) (Math/pow (w-distance ph) 2.0)))
 
 (def w-equal
-  (let [invv (make-inverted-v 0.0 0.2)]
+  (let [invv (make-inverted-v 0.0 0.5)]
     (fn [[x1 x2]]
       (invv (- x1 x2)))))
 
@@ -201,7 +201,7 @@
 
 (defn spread-activation [g]
   (-> (:graph g)
-      (sa/spread-activation (zipmap [:g1 :g2] (:numbers g)) :iterations 5)))
+      (sa/spread-activation (zipmap [:g1 :g2] (:numbers g)) :iterations 20)))
 
 (defn genotype->phenotype [g]
   (-> (spread-activation g)
@@ -389,7 +389,7 @@
       (add-edge g))))
 
 (def mutations
-  [[turn-knob 25]
+  [[turn-knob 10]
    [move-edge 1]
    [add-node 1]
    [remove-node 1]
@@ -430,7 +430,7 @@
             :graph graph)]))
 
 (defn about-half-of [coll]
-  (keep #(when (< (rand) 0.8) %) coll))
+  (keep #(when (< (rand) 0.7) %) coll))
 
 ;(def about-half-of take-first-half)
 
@@ -734,7 +734,7 @@
 
 (defn acclivity
  ([f]
-  (acclivity f 0.01 2 20))
+  (acclivity f 0.01 2 10))
  ([f step dimension n-climbers]
   (let [all-results (hill/run-climbers f step dimension n-climbers)]
     (run! println all-results)
@@ -746,14 +746,14 @@
 
 (defn genotype-acclivity
  ([genotype]
-  (genotype-acclivity genotype 0.01 2 20))
+  (genotype-acclivity genotype 0.01 2 10))
  ([genotype step dimension n-climbers]
   (acclivity (vfn genotype) step dimension n-climbers)))
 
 (defn fn-acclivity
   "Returns only average height reached by hill-climbers. Silent."
  ([f]
-  (fn-acclivity f 0.01 2 20))
+  (fn-acclivity f 0.01 2 10))
  ([f step dimension n-climbers]
   (->> (hill/run-climbers f step dimension n-climbers)
     (map first)
@@ -761,13 +761,13 @@
 
 (defn wfn-acclivity
  ([gt]
-  (wfn-acclivity gt 0.01 2 20))
+  (wfn-acclivity gt 0.01 2 10))
  ([gt step dimension n-climbers]
   (fn-acclivity (get-w gt) step dimension n-climbers)))
 
 (defn vfn-acclivity
  ([gt]
-  (vfn-acclivity gt 0.01 2 20))
+  (vfn-acclivity gt 0.01 2 10))
  ([gt step dimension n-climbers]
   (fn-acclivity (vfn gt) step dimension n-climbers)))
 
@@ -1057,7 +1057,7 @@
 (defn run [& opts]
   (let-ga-opts opts
     (binding [*data-directory* data-directory
-              *genotype->phenotype* (memoize genotype->phenotype)]
+              *genotype->phenotype* genotype->phenotype]
       (with-rng-seed seed
         (println (str "seed=" seed))
         (clear-data-dir data-directory)
@@ -1067,7 +1067,9 @@
           (doseq [epoch (range 1 (inc n-epochs))]
             (when (> n-epochs 1)
               -- (print (str "epoch" epoch \space)))
-            (run-epoch epoch opts))
+            (run-epoch epoch opts)
+            ;-- (apply println (-> p best-of genotype-data mround-floats)))
+            )
           (return (best-of p)))))))
 
 (defn run-and-save [& opts]
