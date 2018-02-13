@@ -14,6 +14,3 @@
         sgt (genotype->edn gt)]
     (let [ht (edn/read-string {:readers edn-readers} sgt)]
       (is (= gt ht)))))
-
-(deftest test-run
-  (run :seed 0 :population-size 5 :generations 2 :n-epochs 2))
