@@ -39,9 +39,8 @@
 
 (declare add-fitness)
 
-(def ^:dynamic *pop-file* *out*) ;output file for population
-(def ^:dynamic *data-directory* (io/file "."))
-(def ^:dynamic *best-genotype-file*)
+#_(def ^:dynamic *pop-file* *out*) ;output file for population
+(def ^:dynamic *data-dir* (io/file "."))
 
 (def lastpop (atom nil))
 
@@ -61,19 +60,102 @@
   (when (and d (not= d (io/file ".")))
     (util/rm-recursively d)))
 
-(defn make-file [basename {:keys [data-directory] :as opts}]
-  (let [file (io/file data-directory basename)]
+(defn make-file [basename {:keys [data-dir] :as opts}]
+  (let [file (io/file data-dir basename)]
     (io/make-parents file)
     file))
 
-(def futures (atom []))
+(defn task-k->file
+  [{:keys [epoch generation]} suffix opts]
+  (make-file (cond
+               (and (nil? epoch) (nil? generation))
+                 suffix
+               (nil? generation)
+                 (str "epoch" epoch suffix)
+               (str "epoch" epoch "-gen" generation suffix))
+             opts))
+
+(def futures (atom {}))
+
+(defn time-for-task? [{:keys [epoch generation] :as task} population opts]
+  (dd task)
+  (let [task (if (= :last (:epoch task))
+               (assoc task :epoch (:n-epochs opts))
+               task)
+        task (if (= :last (:generation task))
+               (assoc task :generation (:generations opts))
+               task)
+        {:keys [epoch generation]} task]
+    (cond
+      (nil? epoch)
+        (when (:all-epochs-done? population)
+          task)
+      (not= epoch (:epoch population))
+        nil
+      (nil? generation)
+        (when (:epoch-done? population)
+          task)
+      (= generation (:generation population))
+        task
+      nil)))
+
+;(defn matching-future? [k target]
+;  (and (= (:data-dir k) (:data-dir target))
 
 (defn await-futures []
   (doseq [fut @futures]
     @fut))
 
-(defmacro start-future [& body]
-  `(swap! futures conj (future ~@body)))
+(def future-types
+  {:save-vfn (fn [task-k population opts]
+               (dd "save-vfn" task-k)
+               (Thread/sleep 2000)
+               (prn "save-vfn" task-k "finishing")
+               #_(save-vfn (best-of population)
+                         (task-k->file task-k ".vfn" opts)))})
+
+(defn future-id [task]
+  (select-keys task [:data-dir :epoch :generation :type]))
+
+(defn mark-future-done [id]
+  (swap! futures assoc-in [id :done?] true))
+
+(defn start-future
+  [{:keys [type] :as task-k} population {:keys [data-dir] :as opts}]
+  (let [task-k (merge task-k {:data-dir data-dir})
+        f (get future-types type)
+        id (future-id task-k)]
+    (swap! futures assoc id {:done? false
+                             :future (future
+                                       (let [result (f task-k population opts)]
+                                         (mark-future-done id)
+                                         result))})))
+
+(defn start-future-if-time [task-k population opts]
+  (when-let [task-k (time-for-task? task-k population opts)]
+    (start-future task-k population opts)))
+  
+(defn start-scheduled-futures [population opts]
+  (doseq [task-type (keys future-types)]
+    (let [schedule (get opts task-type)]
+      (cond
+        (map? schedule)
+          (start-future-if-time
+            (assoc schedule :type task-type) population opts)
+        (vector? schedule)
+          (doseq [task-k schedule]
+            (start-future-if-time
+              (assoc task-k :type task-type) population opts))
+        schedule
+          (start-future-if-time {:type task-type} population opts)
+        nil))))
+
+;(defmacro start-future
+;  "k must be a map, providing dependency info for processes that need this one
+;  to finish."
+;  [k opts & body]
+;  (let [k (merge (select-keys [:data-dir] opts) k)]
+;    `(swap! futures assoc k (future ~@body))))
 
 ;;; edn ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -202,11 +284,9 @@
         w (eval w-source)]
     [w w-source]))
 
-(defn get-w [{:keys [w w-source]}]
+(defn wfn [{:keys [w w-source]}]
   (assert (some? w-source))
   (if (some? w) w (memoize (eval w-source))))
-
-;(def ^:dynamic *w* w)  ;phenotype fitness
 
 ;;; genotype fitness ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -236,14 +316,9 @@
   "Return's genotype gt's virtual fitness function."
   [gt]
   (let [xx->ph (gfn gt)
-        w (get-w gt)]
+        w (wfn gt)]
     (fn [xx]
       (-> xx xx->ph w))))
-;  (fn [xx]
-;    (let [gt' (assoc gt :numbers xx)
-;          ph (*genotype->phenotype* gt')
-;          w (get-w gt')]
-;      (w ph))))
 
 (defn penalize-zeros [w ph]
   (if (some zero? ph)
@@ -253,7 +328,7 @@
 (defn genotype-fitness [g]
   (if-let [fitness (:fitness g)]
     fitness
-    (let [w (get-w g)
+    (let [w (wfn g)
           _ (assert (some? w) "Need phenotype fitness function")
           w #(penalize-zeros w %)]
       (->> (*genotype->phenotype* g)
@@ -270,7 +345,7 @@
         g
         (assoc g :fitness (genotype-fitness g)))))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; making genotypes ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn make-node [n]
   {:pre [(integer? n)]}
@@ -430,7 +505,7 @@
   (let [coll (seq coll)]
     (drop (/ (count coll) 2) coll)))
 
-(defn crossover [g1 g2]
+#_(defn crossover [g1 g2]
   (let [graph1 (:graph g1), graph2 (:graph g2)
         graph (-> (uber/digraph)
                   (uber/add-nodes* (uber/nodes graph1))
@@ -452,7 +527,7 @@
   (->> (uber/nodes g)
        (filter #(#{\g \p} (-> % name str first)))))
 
-(defn crossover [g1 g2]
+#_(defn crossover [g1 g2]
   (let [graph1 (:graph g1), graph2 (:graph g2)
         graph (-> (uber/digraph)
                   (uber/add-nodes* (uber/nodes graph1))
@@ -480,33 +555,12 @@
           :numbers (:numbers g1)
           :graph (:graph g2))])
 
-#_(defn tournament-selection
-  [f-fitness n p]
-  (apply max-key f-fitness
-         (util/choose-without-replacement n (:individuals p))))
-
 (defn tournament-selection [tourney-size fitness-func individuals]
   (apply max-key fitness-func
     (util/choose-without-replacement tourney-size individuals)))
 
 (defn random-pair [coll]
   (util/choose-without-replacement 2 coll))
-
-#_(defn mutate-and-crossover
-  [tourney-size mutate crossover n-by-mutation n-by-crossover p]
-  (let [parents (:individuals p)
-        biased-choice
-          #(tournament-selection tourney-size genotype-fitness parents)
-        mutants (->> (repeatedly biased-choice)
-                     (mapcat #(mutate %))
-                     distinct
-                     (take n-by-mutation)
-                     vec)
-        crosses (->> (repeatedly #(vector (biased-choice) (biased-choice)))
-                     (mapcat #(apply crossover %))
-                     distinct
-                     (take n-by-crossover))]
-    (assoc p :individuals (into mutants crosses))))
 
 (defn mutate-and-crossover
   [tourney-size mutate crossover n-by-mutation n-by-crossover p]
@@ -525,14 +579,6 @@
                      distinct
                      (take n-by-crossover))]
     (assoc p :individuals (into mutants crosses))))
-
-;  [f-fitness n p]
-;  (let [indices (util/choose-without-replacement n
-;                  (range (count (:individuals p))))
-;        individuals (add-fitnesses f-fitness (:individuals p) indices)
-;        contestants (map individuals indices)]
-;    [(assoc p :individuals individuals)
-;     (apply max-key :fitness contestants)]))
 
 #_(defn tournament-selection-on-population [f-fitness n p]
   (loop [winners #{}, n-tries 0]
@@ -585,13 +631,6 @@
            (select-keys [:numbers :phenotype :fitness])) \space
        (graph-cstr (:graph g))))
 
-;  (let [graph (:graph g)
-;        g-numbers (:numbers g)
-;        ph-numbers (:phenotype g)]
-;    (str (:numbers g) \space
-;         (util/nilstr ph-numbers) \space
-;         (graph-cstr graph))))
-
 (defn population-cstr [p]
   (str (strip-type (select-keys p [:generation :epoch])) \newline
        (count (:individuals p))))
@@ -613,7 +652,7 @@
 
 ;;; printing ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn print-population [p]
+#_(defn print-population [p]
   (let [p (update p :individuals #(map add-fitness %))
         individuals (sort-by :fitness (:individuals p))]
     (with-*out* *pop-file*
@@ -639,35 +678,6 @@
   (/ (Math/round (* 100000000.0 x))
      100000000.0))
 
-#_(defn fitness-as-seen-by [g & {:keys [radius step]
-                               :or {radius nil, step 0.005}}]
-  ;(let [[g1 g2] [-1.01 1.01]]  ;(:numbers g)]  ;or else [-1.01 1.01]
-  (let [[g1 g2] (:numbers g)
-        xrange (if radius (range (- g1 radius) (+ g1 radius) step)
-                          (range -1.0 1.000000000001 step))
-        yrange (if radius (range (- g2 radius) (+ g2 radius) step)
-                          (range -1.0 1.000000000001 step))]
-    (doseq [x xrange, y yrange]
-      (let [x (trim-round-off-error x)
-            y (trim-round-off-error y)
-            g' (assoc g :numbers [x y])
-            ph (genotype->phenotype g')
-            [phx phy] ph
-            fitness (w ph)]
-        (println x y fitness phx phy)))))
-
-#_(defn print-fitness-fn
-  "(f [startcoord]) should return [endcoord fitness]."
-  [f & {:keys [step] :or {step 0.005}}]
-  (let [xrange (range -1.0 1.000000000001 step)
-        yrange (range -1.0 1.000000000001 step)]
-    (doseq [x xrange, y yrange]
-      (let [startx (trim-round-off-error x)
-            starty (trim-round-off-error y)
-            startcoord [startx starty]
-            [endcoord fitness] (f [startx starty])]
-        (apply println (concat startcoord [fitness] endcoord))))))
-
 (defn normalize [x]
   (if (zero? x)
     0.0  ;force 0.0; prevent -0.0
@@ -691,7 +701,7 @@
 
 (defn print-range
  ([gt]
-  (print-range (memoize (gfn gt)) (get-w gt)))
+  (print-range (gfn gt) (wfn gt)))
  ([gfn wfn]
   (->> (for [x normalized-range, y normalized-range]
          [x y])
@@ -702,22 +712,10 @@
 
 (defn save-range
  ([gt filename]
-  (save-range (memoize (gfn gt)) (get-w gt) filename))
+  (save-range (gfn gt) (wfn gt) filename))
  ([gfn wfn filename]
   (with-*out* (io/writer filename)
     (print-range gfn wfn))))
-
-#_(defn virtual-fitness-fn
-  "Returns the fitness function f seen by the \"numbers\" part of genotype g.
-  (f [startcoord]) returns [endcoord fitness], where endcoord is the phenotype
-  resulting from startcoord."
-  [g]
-  (fn [startcoord]
-    (let [g' (assoc g :numbers startcoord)
-          ph (genotype->phenotype g')]
-      [ph (w ph)])))
-
-;(defn vfn [g] (comp second (virtual-fitness-fn g)))
 
 ;IDEA What's the average fitness?
 ;IDEA Look at where the fitness goes varying only one axis at a time.
@@ -744,7 +742,7 @@
             fitness (w [x y])]
         (println x y fitness x y)))))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; measuring acclivity ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn acclivity
  ([f]
@@ -755,7 +753,7 @@
     (util/average (map first all-results)))))
 
 (defn save-vfn [genotype filename]
-  (binding [*genotype->phenotype* (memoize genotype->phenotype)]
+  (binding [*genotype->phenotype* genotype->phenotype]
     (save-fn (vfn genotype) filename)))
 
 (defn genotype-acclivity
@@ -777,7 +775,7 @@
  ([gt]
   (wfn-acclivity gt 0.01 2 10))
  ([gt step dimension n-climbers]
-  (fn-acclivity (get-w gt) step dimension n-climbers)))
+  (fn-acclivity (wfn gt) step dimension n-climbers)))
 
 (defn vfn-acclivity
  ([gt]
@@ -807,7 +805,7 @@
   ;select (partial tournament-selection-on-population fitness tourney-size)
   select identity
   next-gen (partial next-generation vary select)
-  data-directory (io/file (str "seed" seed "-d" dimension))
+  data-dir (io/file (str "seed" seed "-d" dimension))
 ;  best-genotype-file (io/file dirname "best-genotype")
 ;  best-fitness-file (io/file dirname "best-fitness")
 ;  hill-climbers-file (io/file dirname "hill-climbers")
@@ -825,7 +823,7 @@
       (print-fitness-fn (fn [ph] [ph (w ph)])))))
 
 #_(defn save-gen-data [{:keys [epoch generation] :as population}]
-  (let [data-file (io/file *data-directory*
+  (let [data-file (io/file *data-dir*
                           (str "best-genotype"
                                "-epoch" epoch
                                "-gen" generation))
@@ -836,14 +834,14 @@
 ))
 
 (defn save-gen-data [{:keys [epoch generation individuals] :as population}]
-  (let [data-file (io/file *data-directory*
+  (let [data-file (io/file *data-dir*
                           (str "epoch" epoch
                                "-gen" generation
                                ".pop"))]
     (io/make-parents data-file)
     (with-*out* (writer data-file)
       (run! prn individuals))
-    (let [dot-file (io/file *data-directory*
+    (let [dot-file (io/file *data-dir*
                             (str "epoch" epoch
                                  "-gen" generation
                                  "-best.dot"))]
@@ -861,8 +859,8 @@
     (str x)
     x))
 
-(defn save-opts [{:keys [data-directory] :as opts}]
-  (let [opts-file (io/file data-directory "opts")
+(defn save-opts [{:keys [data-dir] :as opts}]
+  (let [opts-file (io/file data-dir "opts")
         opts (->> opts (keep (fn [[k v]]
                                (when (not (fn? v))
                                  [k (prep-for-save v)])))
@@ -870,18 +868,6 @@
                        (into {}))]
     (io/make-parents opts-file)
     (spit opts-file (pr-str opts))))
-
-;  (let [population (update :individuals sort-by :fitness)
-;  (with-*out* (writer (io/file *data-directory* "best-genotype"))
-;    (pr 
-
-
-;(defn results-map [{:keys [individuals] :as population}]
-;  ^{:type :acclivation}
-;  (let [best-genotype (best-of population)]
-;    {:population population
-;     :best-genotype best-genotype
-;     :best-fitnesses
 
 (defn accumulate-data [{:keys [generation] :as population}]
   (with-state [population population]
@@ -893,33 +879,6 @@
     -- (reset! lastpop population)
     ))
   
-#_(defn run [& opts]
-  (let-ga-opts opts
-    (binding [*data-directory* data-directory
-              *w* (memoize w)
-              *genotype->phenotype* (memoize genotype->phenotype)]
-      (with-rng-seed seed
-        (println (str "seed=" seed))
-        (with-state [p (make-random-population population-size)]
-          (accumulate-data)
-          -- (save-gen-data p)
-          ;-- (print-population p)
-          (dotimes [i generations]
-            (next-gen)
-            (accumulate-data)
-            -- (save-gen-data p)
-            ;-- (print-population p)
-            )
-          (update :individuals #(map add-fitness %))
-          (bind best (best-of p))
-;          -- (with-*out* (writer vfit-file)
-;               (print-fitness-fn (virtual-fitness-fn best) :step step))
-;          -- (with-*out* (writer vfit-file)
-;               (fitness-as-seen-by best :radius radius :step step))
-          ;-- (run! println (:individuals p))
-          ;-- (run! println (:history p))
-          (return best))))))
-
 (defn w-args [{:keys [w-source] :as gt}]
   (drop 1 w-source))
 
@@ -949,9 +908,6 @@
   [filename]
   (-> filename edn-slurp first))
 
-;(defn best-of-each-epoch [dir]
-;  (let [dir (io/file dir)]
-    
 (defn parse-filename [file]
   (let [file (mkfile file)
         parsed (re-matches #".*epoch(\d+)-gen(\d+)\.pop" (.getName file))]
@@ -1005,6 +961,21 @@
 (defn best-of-gen [file-info]
   (-> file-info :file readbest))
 
+(defn save-vfn-of [epoch gen {:keys [data-dir] :as opts}]
+  (let [gt (read-gt data-dir epoch gen)
+        file (make-file (str "epoch" epoch "-gen" gen ".gfn") opts)]
+    (save-fn (vfn gt) file)))
+
+(defn save-gfn-of [epoch gen {:keys [data-dir] :as opts}]
+  (let [gt (read-gt data-dir epoch gen)
+        file (make-file (str "epoch" epoch "-gen" gen ".gfn") opts)]
+    (save-fn (gfn gt) file)))
+
+(defn save-wfn-of [epoch gen {:keys [data-dir] :as opts}]
+  (let [gt (read-gt data-dir epoch gen)
+        file (make-file (str "epoch" epoch "-gen" gen ".gfn") opts)]
+    (save-fn (wfn gt) file)))
+
 (defn pr-epoch-data [dir epoch]
   (let [best-gt (->> dir saved-files (last-gen-of-epoch epoch) best-of-gen)]
     (apply println (mround-floats (genotype-data best-gt)))))
@@ -1020,35 +991,25 @@
   (doseq [gen (->> dir saved-files (just-epoch epoch) (sort-by :gen))]
     (let [best-gt (best-of-gen gen)]
       (apply println (mround-floats (genotype-data best-gt))))))
-      ;(println (:gen gen) (mround-floats (genotype-data best-gt))))))
 
-(defn save-data-gen-by-gen [epoch {:keys [data-directory] :as opts}]
-  (let [datafile (io/file data-directory (str "epoch" epoch ".data"))]
+(defn save-data-gen-by-gen [epoch {:keys [data-dir] :as opts}]
+  (let [datafile (io/file data-dir (str "epoch" epoch ".data"))]
     (io/make-parents datafile)
     (with-open [datafile (io/writer datafile)]
       (with-*out* datafile
-        (data-gen-by-gen data-directory epoch)))))
+        (data-gen-by-gen data-dir epoch)))))
 
-(defn save-conclusion-of-epoch [epoch {:keys [data-directory] :as opts}]
-  (let [datafile (io/file data-directory (str "epochs.data"))]
+(defn save-conclusion-of-epoch [epoch {:keys [data-dir] :as opts}]
+  (let [datafile (io/file data-dir (str "epochs.data"))]
     (io/make-parents datafile)
     (with-open [datafile (io/writer datafile :append true)]
       (with-*out* datafile
-        (pr-epoch-data data-directory epoch)))))
+        (pr-epoch-data data-dir epoch)))))
 
-;TODO Actually call this.
-(defn write-done [{:keys [data-directory] :as opts}]
+(defn write-done [{:keys [data-dir] :as opts}]
   (let [donefile (make-file "DONE" opts)]
     (with-open [donefile (io/writer donefile)]
       :nothing)))
-
-;(defn data-gen-by-gen [dir epoch]
-;  (doseq [gen (->> dir
-;                   saved-files
-;                   (filter #(= epoch (:epoch %)))
-;                   (sort-by :gen))]
-;    (let [best-gt (best-of-gen gen)]
-;      (println (:gen gen) (mround-floats (genotype-data best-gt))))))
 
 ;(println (->> "seed1-d2" saved-files (last-gen-of-epoch 5) best-of-gen))
 
@@ -1059,12 +1020,13 @@
     (let [[w w-source] (make-epoch-w)]
       (println w-source)
       (with-state [p start-population]
-        (assoc :epoch epoch, :generation 0,
+        (assoc :epoch epoch, :generation 0, :epoch-done? false,
                :w-source w-source, :w (memoize w))
         (when (empty? (:individuals p))
           (make-random-population population-size))
         (accumulate-data)
         -- (save-gen-data p)
+        -- (start-scheduled-futures p opts)
         ;-- (println (best-fitness-of p))
         ;-- (apply println (-> p best-of genotype-data mround-floats))
         (doseq [generation (range 1 (inc generations))]
@@ -1074,33 +1036,49 @@
           -- (save-gen-data p)
           ;-- (println (best-fitness-of p))
           ;-- (apply println (-> p best-of genotype-data mround-floats))
+          -- (start-scheduled-futures p opts)
           )
         -- (save-dot (str "epoch" epoch "-best.dot") (best-of p) opts)
-        -- (start-future (save-data-gen-by-gen epoch opts))
-        -- (start-future (save-conclusion-of-epoch epoch opts))))))
+        (assoc :epoch-done? true)
+        -- (start-scheduled-futures p opts)
+;        (when (:save-epoch-vfn opts)
+;          -- (start-future (save-vfn (best-of p)
+;                                     (make-file (str "epoch" epoch "-best.vfn")
+;                                                opts))))
+;        -- (start-future (save-data-gen-by-gen epoch opts))
+;        -- (start-future (save-conclusion-of-epoch epoch opts))
+        ))))
 
 (defn run [& opts]
   (let-ga-opts opts
-    (binding [*data-directory* data-directory
+    (binding [*data-dir* data-dir
               *genotype->phenotype* genotype->phenotype]
       (with-rng-seed seed
         (println (str "seed=" seed))
-        (clear-data-dir data-directory)
+        (clear-data-dir data-dir)
         (save-opts opts)
         (with-state [p empty-population]
-          (assoc :seed util/*rng-seed*)
+          (assoc :seed util/*rng-seed*, :all-epochs-done? false,
+                 :epoch 0, :generation 0)
+          -- (start-scheduled-futures p opts)
           (doseq [epoch (range 1 (inc n-epochs))]
             (when (> n-epochs 1)
               -- (print (str "epoch" epoch \space)))
             (run-epoch epoch opts)
             ;-- (apply println (-> p best-of genotype-data mround-floats)))
             )
+          (assoc :all-epochs-done? true)
           -- (save-dot "best.dot" (best-of p) opts)
-          -- (await-futures)
-          -- (write-done opts)
+          -- (start-scheduled-futures p opts)
+;          (when (:save-vfn opts)
+;            -- (start-future (save-vfn (best-of p)
+;                                       (make-file "best.vfn" opts))))
+          -- (pprint @futures)
+          ;-- (await-futures)
+          ;-- (write-done opts)
           (return (best-of p)))))))
 
-(defn run-and-save [& opts]
+#_(defn run-and-save [& opts]
   (let [opts (->> opts (map clojure.edn/read-string) (apply hash-map))
         winning-genotype (run opts)]
     (spit "winner" winning-genotype)
@@ -1113,7 +1091,16 @@
 
 (defn test-run [& opts]
   (time
-    (run :seed 0 :population-size 1 :generations 1 :n-epochs 1)))
+    (run :seed 0 :population-size 1 :generations 1 :n-epochs 1
+         :save-vfn [{:epoch 1 :generation 0} {:epoch 20 :generation :last}
+                    {:epoch 20 :generation :last}])))
+
+(defn scripted-run []
+  (run :seed 1 :population-size 40 :generations 20 :n-epochs 40
+       :save-vfn [{:epoch 1 :generation 0} {:epoch 20 :generation :last}
+                  {:epoch 20 :generation :last}]
+       :save-gfn [{:epoch 1 :generation 0} {:epoch 20 :generation :last}
+                  {:epoch 20 :generation :last}]))
 
 (defn make-article-data
   "Makes all the fitness-func and population data files for the article."

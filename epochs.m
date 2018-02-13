@@ -1,6 +1,9 @@
 function result = epochs(filename)
 % Plots phenotype fitness and virtual fitness against epoch number.
 
+[pathstr, name, ext] = fileparts(filename);
+output_filename = fullfile(pathstr, [name '.pdf']);
+
 fid = fopen(filename);
 D = textscan(fid, '%f%f%f%s%s%s%d%s%s%f');
 fclose(fid);
@@ -14,6 +17,6 @@ fitness = D{10};
 plot(epoch,ph_accl,epoch,v_accl)
 legend('phenotype acclivity', 'virtual acclivity', 'Location', 'nw');
 fig = gcf;
-set(fig,'PaperUnits','inches');
-set(fig,'PaperPosition',[0.5 0.5 8 2]);
-print('-dpdf', strcat(filename, '.pdf'));
+%set(fig,'PaperUnits','inches');
+%set(fig,'PaperPosition',[0.5 0.5 8 2]);
+%print('-dpdf', strcat(filename, '.pdf'));
