@@ -40,7 +40,11 @@
 (declare add-fitness)
 
 #_(def ^:dynamic *pop-file* *out*) ;output file for population
-(def ^:dynamic *data-dir* (io/file "."))
+(def ^:dynamic *data-dir* (io/file "."))  ;TODO rm
+
+(defn matlab [command]
+  (clojure.java.shell/sh "matlab" "-nodesktop" "-nosplash" "-r"
+                         (str command "; exit;")))
 
 (def lastpop (atom nil))
 
@@ -102,17 +106,23 @@
 ;(defn matching-future? [k target]
 ;  (and (= (:data-dir k) (:data-dir target))
 
-(defn await-futures []
-  (doseq [fut @futures]
-    @fut))
+(defn all-futures-done? [{:keys [data-dir] :as opts}]
+  (let [is? #(= data-dir (:data-dir %))]
+    (every? :done?
+      (S/select [(S/selected? S/MAP-KEYS is?) S/MAP-VALS] @futures))))
+
+(defn await-futures [opts]
+  (when (not (all-futures-done? opts))
+    (Thread/sleep 500)
+    (recur opts)))
 
 (def future-types
   {:save-vfn (fn [task-k population opts]
-               (dd "save-vfn" task-k)
-               (Thread/sleep 2000)
-               (prn "save-vfn" task-k "finishing")
-               #_(save-vfn (best-of population)
-                         (task-k->file task-k ".vfn" opts)))})
+               (let [vfnfile (task-k->file task-k ".vfn" opts)]
+                 (dd "save-vfn" task-k)
+                 (save-vfn (best-of population) vfnfile)
+                 (matlab (str "mesh3(" vfnfile ")"))
+                 (prn "save-vfn" task-k "finishing")))})
 
 (defn future-id [task]
   (select-keys task [:data-dir :epoch :generation :type]))
@@ -149,13 +159,6 @@
         schedule
           (start-future-if-time {:type task-type} population opts)
         nil))))
-
-;(defmacro start-future
-;  "k must be a map, providing dependency info for processes that need this one
-;  to finish."
-;  [k opts & body]
-;  (let [k (merge (select-keys [:data-dir] opts) k)]
-;    `(swap! futures assoc k (future ~@body))))
 
 ;;; edn ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -1070,12 +1073,9 @@
           (assoc :all-epochs-done? true)
           -- (save-dot "best.dot" (best-of p) opts)
           -- (start-scheduled-futures p opts)
-;          (when (:save-vfn opts)
-;            -- (start-future (save-vfn (best-of p)
-;                                       (make-file "best.vfn" opts))))
           -- (pprint @futures)
-          ;-- (await-futures)
-          ;-- (write-done opts)
+          -- (await-futures opts)
+          -- (write-done opts)
           (return (best-of p)))))))
 
 #_(defn run-and-save [& opts]
