@@ -61,6 +61,20 @@
   (when (and d (not= d (io/file ".")))
     (util/rm-recursively d)))
 
+(defn make-file [basename {:keys [data-directory] :as opts}]
+  (let [file (io/file data-directory basename)]
+    (io/make-parents file)
+    file))
+
+(def futures (atom []))
+
+(defn await-futures []
+  (doseq [fut @futures]
+    @fut))
+
+(defmacro start-future [& body]
+  `(swap! futures conj (future ~@body)))
+
 ;;; edn ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn strip-type [x]
@@ -546,7 +560,7 @@
   (str (name node) \space "[label=" (mround (sa/a graph node)) "] "))
 
 (defn make-dot [graph]
-  (str "digraph graphname {
+  (str "digraph g {
 { rank=source edge [style=\"invis\"] g1 -> g2 }
 { rank=sink edge [style=\"invis\"] p1 -> p2 }
 "
@@ -828,7 +842,19 @@
                                ".pop"))]
     (io/make-parents data-file)
     (with-*out* (writer data-file)
-      (run! prn individuals))))
+      (run! prn individuals))
+    (let [dot-file (io/file *data-directory*
+                            (str "epoch" epoch
+                                 "-gen" generation
+                                 "-best.dot"))]
+      (io/make-parents dot-file)
+      (with-*out* (writer dot-file)
+        (print-genotype-graph (best-of population))))))
+
+(defn save-dot [basename gt opts]
+  (with-open [dot-file (io/writer (make-file basename opts))]
+    (with-*out* dot-file
+      (print-genotype-graph gt))))
 
 (defn prep-for-save [x]
   (if (= java.io.File (type x))
@@ -842,7 +868,6 @@
                                  [k (prep-for-save v)])))
                        (map vec)
                        (into {}))]
-    (dd opts)
     (io/make-parents opts-file)
     (spit opts-file (pr-str opts))))
 
@@ -1013,8 +1038,7 @@
 
 ;TODO Actually call this.
 (defn write-done [{:keys [data-directory] :as opts}]
-  (let [donefile (io/file data-directory "DONE")]
-    (io/make-parents donefile)
+  (let [donefile (make-file "DONE" opts)]
     (with-open [donefile (io/writer donefile)]
       :nothing)))
 
@@ -1051,8 +1075,9 @@
           ;-- (println (best-fitness-of p))
           ;-- (apply println (-> p best-of genotype-data mround-floats))
           )
-        -- (future (save-data-gen-by-gen epoch opts))
-        -- (future (save-conclusion-of-epoch epoch opts))))))
+        -- (save-dot (str "epoch" epoch "-best.dot") (best-of p) opts)
+        -- (start-future (save-data-gen-by-gen epoch opts))
+        -- (start-future (save-conclusion-of-epoch epoch opts))))))
 
 (defn run [& opts]
   (let-ga-opts opts
@@ -1070,6 +1095,9 @@
             (run-epoch epoch opts)
             ;-- (apply println (-> p best-of genotype-data mround-floats)))
             )
+          -- (save-dot "best.dot" (best-of p) opts)
+          -- (await-futures)
+          -- (write-done opts)
           (return (best-of p)))))))
 
 (defn run-and-save [& opts]
