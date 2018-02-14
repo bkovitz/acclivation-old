@@ -124,7 +124,7 @@
 
 (def ^{:doc "Activation"} A (attr :a))
 
-(def decay 1.0)
+#_(def decay 1.0)
 
 (defn apply-initial-activations
   [g initial-activations]
@@ -138,7 +138,8 @@
     (reduce (fn [total [weight a]] (+ total (* weight a))) 0)))
 
 (defn spread-activation
-  [g initial-activations & {:keys [iterations] :or {iterations 1}}]
+  [g initial-activations & {:keys [iterations decay]
+                            :or {iterations 1, decay 1.0}}]
   (let [g0 (transform [NODES VAL A]
              (fn [[_ node] _]
                (get initial-activations node 0.0))

@@ -1096,14 +1096,19 @@
         (println (util/average (map first climber-results)))))
     (save-vfn winning-genotype "winner.vfn")))
 
+(def base-opts {:seed 0 :population-size 40 :generations 20 :n-epochs 100
+                :save-vfn [{:epoch 1 :generation 0}
+                           {:epoch :last :generation :last}]
+                :epochs-data true})
+
+(defn run5 [& opts]
+  (time
+    (doseq [seed [1 2 3 4 5]]
+      (run (assoc base-opts :seed seed)))))
+
 (defn test-run [& opts]
-  (let [opts {:seed 0 :population-size 40 :generations 20 :n-epochs 100
-              :save-vfn [{:epoch 1 :generation 0}
-                         {:epoch :last :generation :last}]
-              :epochs-data true}]
-    (time
-      (doseq [seed [1 2 3 4 5]]
-        (run (assoc opts :seed seed))))))
+  (time
+    (run (assoc base-opts :delay 0.2))))
 
 #_(defn scripted-run []
   (run :seed 1 :population-size 40 :generations 20 :n-epochs 40
