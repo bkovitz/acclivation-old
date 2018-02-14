@@ -4,8 +4,7 @@ function result = scat3(filename)
 % Filename must contain three columns: X, Y, Z
 
 D = importdata(filename);
-[pathstr, name, ext] = fileparts(filename);
-output_filename = fullfile(pathstr, [name '.pdf']);
+output_filename = strcat(filename, '.pdf');
 
 X = D(:,1);
 Y = D(:,2);

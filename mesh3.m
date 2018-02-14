@@ -2,8 +2,7 @@ function result = mesh3(filename)
 % Saves a 3D mesh plot of a fitness function
 
 D = importdata(filename);
-[pathstr, name, ext] = fileparts(filename);
-output_filename = fullfile(pathstr, [name '.pdf']);
+output_filename = strcat(filename, '.pdf');
 
 X = D(:,1);
 Y = D(:,2);

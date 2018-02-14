@@ -28,10 +28,12 @@ acclivation.pdf: papers.bib
 	./mkplots
 
 run1:
-	lein run -m farg.acclivation/run-and-save :generations 20 :n-epochs 200 :seed 6 :population-size 20 :tourney-size 4
+	date
+	nice -19 lein run -m farg.acclivation/test-run
+	#lein run -m farg.acclivation/run-and-save :generations 20 :n-epochs 200 :seed 6 :population-size 20 :tourney-size 4
 
 nohup:
-	nohup time nice make run1 &
+	nohup time make run1 &
 
 tags:
 	ctags -R src/ checkouts/

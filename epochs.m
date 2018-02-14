@@ -4,8 +4,7 @@ function result = epochs(filename)
 % Expected data format corresponds to the (genotype-data) function in
 % Clojure.
 
-[pathstr, name, ext] = fileparts(filename);
-output_filename = fullfile(pathstr, [name '.pdf']);
+output_filename = strcat(filename, '.pdf');
 
 fid = fopen(filename);
 D = textscan(fid, '%d%d%f%s%s%s%s%d%s%s%f');

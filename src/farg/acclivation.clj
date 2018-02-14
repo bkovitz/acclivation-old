@@ -44,7 +44,7 @@
 
 (defn matlab [command]
   (clojure.java.shell/sh "matlab" "-nodesktop" "-nosplash" "-r"
-                         (str command "; exit;") ">>" "matlab.out"))
+                         (str command "; exit;") ">>" "matlab.out" "2>&1"))
 
 (def lastpop (atom nil))
 
@@ -1097,10 +1097,13 @@
     (save-vfn winning-genotype "winner.vfn")))
 
 (defn test-run [& opts]
-  (time
-    (run :seed 0 :population-size 10 :generations 10 :n-epochs 10
-         :save-vfn [{:epoch 1 :generation 0} {:epoch :last :generation :last}]
-         :epochs-data true)))
+  (let [opts {:seed 0 :population-size 40 :generations 20 :n-epochs 100
+              :save-vfn [{:epoch 1 :generation 0}
+                         {:epoch :last :generation :last}]
+              :epochs-data true}]
+    (time
+      (doseq [seed [1 2 3 4 5]]
+        (run (assoc opts :seed seed))))))
 
 #_(defn scripted-run []
   (run :seed 1 :population-size 40 :generations 20 :n-epochs 40
