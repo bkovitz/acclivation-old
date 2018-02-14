@@ -7,7 +7,7 @@ function result = epochs(filename)
 output_filename = strcat(filename, '.pdf');
 
 fid = fopen(filename);
-D = textscan(fid, '%d%d%f%s%s%s%s%d%s%s%f');
+D = textscan(fid, '%d%d%f%f%s%s%s%d%s%s%f');
 fclose(fid);
 
 epoch = D{1};

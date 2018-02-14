@@ -968,7 +968,7 @@
        (save-dot dotfile (best-of population) opts)
        (save-vfn (best-of population) vfnfile)
        (matlab (str "mesh3 '" vfnfile "'"))
-       (save-gfn (best-of population) gfnfile)
+       (save-range (best-of population) gfnfile)
        (matlab (str "scat3 '" gfnfile "'"))))
    :epochs-data
      (fn [task-k population opts]
