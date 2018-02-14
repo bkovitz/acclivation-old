@@ -44,7 +44,7 @@
 
 (defn matlab [command]
   (clojure.java.shell/sh "matlab" "-nodesktop" "-nosplash" "-r"
-                         (str command "; exit;")))
+                         (str command "; exit;") ">>" "matlab.out"))
 
 (def lastpop (atom nil))
 
@@ -78,87 +78,6 @@
                  (str "epoch" epoch suffix)
                (str "epoch" epoch "-gen" generation suffix))
              opts))
-
-(def futures (atom {}))
-
-(defn time-for-task? [{:keys [epoch generation] :as task} population opts]
-  (dd task)
-  (let [task (if (= :last (:epoch task))
-               (assoc task :epoch (:n-epochs opts))
-               task)
-        task (if (= :last (:generation task))
-               (assoc task :generation (:generations opts))
-               task)
-        {:keys [epoch generation]} task]
-    (cond
-      (nil? epoch)
-        (when (:all-epochs-done? population)
-          task)
-      (not= epoch (:epoch population))
-        nil
-      (nil? generation)
-        (when (:epoch-done? population)
-          task)
-      (= generation (:generation population))
-        task
-      nil)))
-
-;(defn matching-future? [k target]
-;  (and (= (:data-dir k) (:data-dir target))
-
-(defn all-futures-done? [{:keys [data-dir] :as opts}]
-  (let [is? #(= data-dir (:data-dir %))]
-    (every? :done?
-      (S/select [(S/selected? S/MAP-KEYS is?) S/MAP-VALS] @futures))))
-
-(defn await-futures [opts]
-  (when (not (all-futures-done? opts))
-    (Thread/sleep 500)
-    (recur opts)))
-
-(def future-types
-  {:save-vfn (fn [task-k population opts]
-               (let [vfnfile (task-k->file task-k ".vfn" opts)]
-                 (dd "save-vfn" task-k)
-                 (save-vfn (best-of population) vfnfile)
-                 (matlab (str "mesh3(" vfnfile ")"))
-                 (prn "save-vfn" task-k "finishing")))})
-
-(defn future-id [task]
-  (select-keys task [:data-dir :epoch :generation :type]))
-
-(defn mark-future-done [id]
-  (swap! futures assoc-in [id :done?] true))
-
-(defn start-future
-  [{:keys [type] :as task-k} population {:keys [data-dir] :as opts}]
-  (let [task-k (merge task-k {:data-dir data-dir})
-        f (get future-types type)
-        id (future-id task-k)]
-    (swap! futures assoc id {:done? false
-                             :future (future
-                                       (let [result (f task-k population opts)]
-                                         (mark-future-done id)
-                                         result))})))
-
-(defn start-future-if-time [task-k population opts]
-  (when-let [task-k (time-for-task? task-k population opts)]
-    (start-future task-k population opts)))
-  
-(defn start-scheduled-futures [population opts]
-  (doseq [task-type (keys future-types)]
-    (let [schedule (get opts task-type)]
-      (cond
-        (map? schedule)
-          (start-future-if-time
-            (assoc schedule :type task-type) population opts)
-        (vector? schedule)
-          (doseq [task-k schedule]
-            (start-future-if-time
-              (assoc task-k :type task-type) population opts))
-        schedule
-          (start-future-if-time {:type task-type} population opts)
-        nil))))
 
 ;;; edn ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -759,6 +678,10 @@
   (binding [*genotype->phenotype* genotype->phenotype]
     (save-fn (vfn genotype) filename)))
 
+(defn save-gfn [genotype filename]
+  (binding [*genotype->phenotype* genotype->phenotype]
+    (save-fn (gfn genotype) filename)))
+
 (defn genotype-acclivity
  ([genotype]
   (genotype-acclivity genotype 0.01 2 10))
@@ -794,12 +717,11 @@
 (defopts let-ga-opts
   {:keys [generations population-size n-mutants n-crosses f-mutate
                      f-cross tourney-size vary select fitness seed
-                     radius step dimension n-epochs]
+                     radius step dimension n-epochs epochs-data]
    :or {generations 20, population-size 40, tourney-size 5,
         f-mutate (partial mutate-n 1), f-cross crossover,
         fitness genotype-fitness, seed 1, dimension 2, n-epochs 1,
-        radius nil, step 0.01}} ;arguments for fitness-as-seen-by
-          ;make step 0.005 for precise fitness func (it just takes a long time)
+        radius nil, step 0.01, epochs-data true}}
   n-mutants (default-to n-mutants (int (* population-size 0.71)))
   n-crosses (default-to n-crosses (- population-size n-mutants))
   vary (default-to vary
@@ -843,17 +765,10 @@
                                ".pop"))]
     (io/make-parents data-file)
     (with-*out* (writer data-file)
-      (run! prn individuals))
-    (let [dot-file (io/file *data-dir*
-                            (str "epoch" epoch
-                                 "-gen" generation
-                                 "-best.dot"))]
-      (io/make-parents dot-file)
-      (with-*out* (writer dot-file)
-        (print-genotype-graph (best-of population))))))
+      (run! prn individuals))))
 
-(defn save-dot [basename gt opts]
-  (with-open [dot-file (io/writer (make-file basename opts))]
+(defn save-dot [dot-file gt opts]
+  (with-open [dot-file (io/writer dot-file)]
     (with-*out* dot-file
       (print-genotype-graph gt))))
 
@@ -1009,6 +924,99 @@
       (with-*out* datafile
         (pr-epoch-data data-dir epoch)))))
 
+;;; futures ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def futures (atom {}))
+
+(defn time-for-task? [{:keys [epoch generation] :as task} population opts]
+  (let [task (if (= :last (:epoch task))
+               (assoc task :epoch (:n-epochs opts))
+               task)
+        task (if (= :last (:generation task))
+               (assoc task :generation (:generations opts))
+               task)
+        {:keys [epoch generation]} task]
+    (cond
+      (nil? epoch)
+        (when (:all-epochs-done? population)
+          task)
+      (not= epoch (:epoch population))
+        nil
+      (nil? generation)
+        (when (:epoch-done? population)
+          task)
+      (= generation (:generation population))
+        task
+      nil)))
+
+(defn all-futures-done? [{:keys [data-dir] :as opts}]
+  (let [is? #(= data-dir (:data-dir %))]
+    (every? :done?
+      (S/select [(S/selected? S/MAP-KEYS is?) S/MAP-VALS] @futures))))
+
+(defn await-futures [opts]
+  (when (not (all-futures-done? opts))
+    (Thread/sleep 500)
+    (recur opts)))
+
+(def future-types
+  {:save-vfn
+   (fn [task-k population opts]
+     (let [vfnfile (task-k->file task-k "-best.vfn" opts)
+           gfnfile (task-k->file task-k "-best.gfn" opts)
+           dotfile (task-k->file task-k "-best.dot" opts)]
+       (save-dot dotfile (best-of population) opts)
+       (save-vfn (best-of population) vfnfile)
+       (matlab (str "mesh3 '" vfnfile "'"))
+       (save-gfn (best-of population) gfnfile)
+       (matlab (str "scat3 '" gfnfile "'"))))
+   :epochs-data
+     (fn [task-k population opts]
+       (let [datafile (task-k->file task-k "epochs.data" opts)]
+         (with-open [datafile (io/writer datafile)]
+           (with-*out* datafile
+             (data-epoch-by-epoch (:data-dir task-k))))
+         (matlab (str "epochs '" datafile "'"))))
+     })
+
+(defn future-id [task]
+  (select-keys task [:data-dir :epoch :generation :type]))
+
+(defn mark-future-done [id]
+  (swap! futures assoc-in [id :done?] true))
+
+(defn start-future
+  [{:keys [type] :as task-k} population {:keys [data-dir] :as opts}]
+  (let [task-k (merge task-k {:data-dir data-dir})
+        f (get future-types type)
+        id (future-id task-k)]
+    (swap! futures assoc id {:done? false
+                             :future (future
+                                       (let [result (f task-k population opts)]
+                                         (mark-future-done id)
+                                         result))})))
+
+(defn start-future-if-time [task-k population opts]
+  (when-let [task-k (time-for-task? task-k population opts)]
+    (start-future task-k population opts)))
+  
+(defn start-scheduled-futures [population opts]
+  (doseq [task-type (keys future-types)]
+    (let [schedule (get opts task-type)]
+      (cond
+        (map? schedule)
+          (start-future-if-time
+            (assoc schedule :type task-type) population opts)
+        (vector? schedule)
+          (doseq [task-k schedule]
+            (start-future-if-time
+              (assoc task-k :type task-type) population opts))
+        schedule
+          (start-future-if-time {:type task-type} population opts)
+        nil))))
+
+;;; running ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defn write-done [{:keys [data-dir] :as opts}]
   (let [donefile (make-file "DONE" opts)]
     (with-open [donefile (io/writer donefile)]
@@ -1041,7 +1049,7 @@
           ;-- (apply println (-> p best-of genotype-data mround-floats))
           -- (start-scheduled-futures p opts)
           )
-        -- (save-dot (str "epoch" epoch "-best.dot") (best-of p) opts)
+        ;-- (save-dot (str "epoch" epoch "-best.dot") (best-of p) opts)
         (assoc :epoch-done? true)
         -- (start-scheduled-futures p opts)
 ;        (when (:save-epoch-vfn opts)
@@ -1071,9 +1079,8 @@
             ;-- (apply println (-> p best-of genotype-data mround-floats)))
             )
           (assoc :all-epochs-done? true)
-          -- (save-dot "best.dot" (best-of p) opts)
+          ;-- (save-dot "best.dot" (best-of p) opts)
           -- (start-scheduled-futures p opts)
-          -- (pprint @futures)
           -- (await-futures opts)
           -- (write-done opts)
           (return (best-of p)))))))
@@ -1091,11 +1098,11 @@
 
 (defn test-run [& opts]
   (time
-    (run :seed 0 :population-size 1 :generations 1 :n-epochs 1
-         :save-vfn [{:epoch 1 :generation 0} {:epoch 20 :generation :last}
-                    {:epoch 20 :generation :last}])))
+    (run :seed 0 :population-size 10 :generations 10 :n-epochs 10
+         :save-vfn [{:epoch 1 :generation 0} {:epoch :last :generation :last}]
+         :epochs-data true)))
 
-(defn scripted-run []
+#_(defn scripted-run []
   (run :seed 1 :population-size 40 :generations 20 :n-epochs 40
        :save-vfn [{:epoch 1 :generation 0} {:epoch 20 :generation :last}
                   {:epoch 20 :generation :last}]

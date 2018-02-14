@@ -17,3 +17,7 @@ axis vis3d
 %fig = gcf;
 %set(fig, 'PaperPositionMode', 'auto')
 %print('-dpdf', '-r0', output_filename);
+
+fig = gcf;
+set(fig, 'PaperPositionMode', 'auto')
+print('-dpdf', '-r0', output_filename);
