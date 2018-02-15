@@ -215,9 +215,11 @@
 (defn extract-phenotype [g]
   [(sa/a g :p1) (sa/a g :p2)])
 
+;TODO Pass opts
 (defn spread-activation [g]
   (-> (:graph g)
-      (sa/spread-activation (zipmap [:g1 :g2] (:numbers g)) :iterations 20)))
+      (sa/spread-activation (zipmap [:g1 :g2] (:numbers g))
+                            :iterations 20 :decay 0.2)))
 
 (defn genotype->phenotype [g]
   (-> (spread-activation g)
@@ -527,6 +529,7 @@
 (defn dot-node [graph node]
   (str (name node) \space "[label=" (mround (sa/a graph node)) "] "))
 
+;TODO Put the initial activations into the graph above the :g nodes.
 (defn make-dot [graph]
   (str "digraph g {
 { rank=source edge [style=\"invis\"] g1 -> g2 }
