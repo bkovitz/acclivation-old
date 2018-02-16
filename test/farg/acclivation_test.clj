@@ -14,3 +14,5 @@
         sgt (genotype->edn gt)]
     (let [ht (edn/read-string {:readers edn-readers} sgt)]
       (is (= gt ht)))))
+
+;TODO A short-running end-to-end test of farg.acclivation/run.

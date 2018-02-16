@@ -4,10 +4,10 @@
             [clojure.pprint :refer [pprint]]
             [clojure.math.numeric-tower :as math]
             [com.rpl.specter :refer :all]
-            [ubergraph.core :as uber]
             [farg.util :refer [dd dde vector-contains?] :as util]
             [farg.with-state :refer [with-state]]
-            [farg.x.navs :refer :all]))
+            [farg.x.navs :refer :all]
+            [ubergraph.core :as uber]))
 
 (defn make-sigmoid-fn
   "Returns a logistic function with given center and range, with given
@@ -63,7 +63,7 @@
 (defn simple-newa [old-activation sum-of-inputs]
   (squash (+ old-activation sum-of-inputs)))
 
-(defn spread-activation
+#_(defn spread-activation
   "g is an ubergraph.
   initial-activations is map of nodes to activations. Any nodes in g without
   a corresponding key in initial-activations start with activation 0.0.

@@ -1111,7 +1111,8 @@
 
 (defn test-run [& opts]
   (time
-    (run (assoc base-opts :delay 0.2))))
+    (run (assoc base-opts :n-epochs 1 :generations 5 :population-size 5
+                          :decay 0.2))))
 
 #_(defn scripted-run []
   (run :seed 1 :population-size 40 :generations 20 :n-epochs 40
