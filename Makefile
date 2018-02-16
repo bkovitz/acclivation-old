@@ -29,7 +29,8 @@ acclivation.pdf: papers.bib
 
 run1:
 	date
-	nice -19 lein run -m farg.acclivation/test-run
+	#nice -19 lein run -m farg.acclivation/test-run
+	#nice -19 lein run -m farg.acclivation/run5
 	date
 	#lein run -m farg.acclivation/run-and-save :generations 20 :n-epochs 200 :seed 6 :population-size 20 :tourney-size 4
 
