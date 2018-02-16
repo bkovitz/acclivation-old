@@ -81,9 +81,6 @@
 
 ;;; edn ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn strip-type [x]
-  (vary-meta x #(dissoc % :type)))
-
 (defn edge->vec [g e]
   [(uber/src e) (uber/dest e) (uber/attr g e :weight)])
 
@@ -219,7 +216,7 @@
 (defn spread-activation [g]
   (-> (:graph g)
       (sa/spread-activation (zipmap [:g1 :g2] (:numbers g))
-                            :iterations 20 :decay 0.2)))
+                            :iterations 20 :decay 1.0)))
 
 (defn genotype->phenotype [g]
   (-> (spread-activation g)
@@ -316,6 +313,7 @@
   (assert (:w population))
   (-> gt
     (merge (select-keys population [:w-source :w :epoch :generation]))
+    (dissoc :phenotype :fitness)
     (add-phenotype)
     (add-fitness)))
 
